@@ -6,6 +6,7 @@ pub const ACTIVITY_THRESHOLD_UNITS: u64 = 10;
 pub const ACTIVE_SECONDS: i64 = 7 * 24 * 60 * 60;
 pub const GRACE_SECONDS: i64 = 48 * 60 * 60;
 pub const PIONEER_SLOTS: u16 = 100;
+pub const PIONEER_SCALE: u128 = 1_000_000_000_000_000_000;
 pub const BPS_DENOMINATOR: u64 = 10_000;
 pub const DIRECT_BPS: u64 = 5_000;
 pub const NETWORK_BPS: u64 = 4_300;
