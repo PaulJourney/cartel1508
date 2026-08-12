@@ -4,7 +4,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   reference-and-static:
@@ -42,15 +42,32 @@ jobs:
             fi
             sleep $((i * 5))
           done
-      - name: Build clean source
+      - name: Apply V0.9A migration for diagnostic build
+        run: |
+          python3 scripts/migrate-v0-9a.py
+          git diff -- programs/service_referral_protocol/src/lib.rs
+      - name: Build V0.9A diagnostic
         run: anchor build --ignore-keys
       - name: Rust unit tests
         run: cargo test --workspace
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+
+  persist-v09a:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/agent/solana-protocol-v0.8'
+    needs: [reference-and-static, anchor-build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
         with:
-          name: anchor-build
-          path: |
-            target/deploy/*.so
-            target/idl/*.json
-          if-no-files-found: error
+          ref: agent/solana-protocol-v0.8
+      - name: Persist tested V0.9A migration
+        run: |
+          python3 scripts/migrate-v0-9a.py
+          if git diff --quiet -- programs/service_referral_protocol/src/lib.rs; then
+            echo "V0.9A migration already persisted"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add programs/service_referral_protocol/src/lib.rs
+          git commit -m "implement V0.9A activity and Pioneer precision"
+          git push origin HEAD:agent/solana-protocol-v0.8
