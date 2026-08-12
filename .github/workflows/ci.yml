@@ -29,8 +29,18 @@ jobs:
           solana --version
           anchor --version
           rustc --version
+      - name: Preinstall sBPF platform tools with retries
+        run: |
+          for i in 1 2 3 4 5; do
+            cargo-build-sbf --install-only && break
+            if [ "$i" = "5" ]; then
+              echo "platform-tools installation failed after retries" >&2
+              exit 1
+            fi
+            sleep $((i * 5))
+          done
       - name: Build
-        run: anchor build
+        run: anchor build --ignore-keys
       - name: Rust unit tests
         run: cargo test --workspace
       - name: Upload build artifacts
