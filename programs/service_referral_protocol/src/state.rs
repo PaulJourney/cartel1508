@@ -12,10 +12,12 @@ pub struct ProtocolState {
     pub usdc_mint: Pubkey,
     pub pioneer_count: u16,
     pub real_user_count: u64,
+    /// Global per-virtual-share Pioneer index, scaled by PIONEER_SCALE.
     pub pioneer_index_usdt: u128,
     pub pioneer_index_usdc: u128,
-    pub pioneer_reserve_usdt: u64,
-    pub pioneer_reserve_usdc: u64,
+    /// Fractional unassigned Pioneer value not yet transferable as a whole token atom.
+    pub pioneer_unassigned_remainder_usdt_scaled: u128,
+    pub pioneer_unassigned_remainder_usdc_scaled: u128,
     pub lifetime_service_fees_usdt: u128,
     pub lifetime_service_fees_usdc: u128,
     pub lifetime_unallocated_usdt: u128,
@@ -25,7 +27,7 @@ pub struct ProtocolState {
 }
 
 impl ProtocolState {
-    pub const SPACE: usize = 8 + 2 + 8 + 8 + (32 * 4) + 2 + 8 + (16 * 2) + (8 * 2) + (16 * 6);
+    pub const SPACE: usize = 324;
 }
 
 #[account]
@@ -38,6 +40,8 @@ pub struct UserState {
     pub active_until: i64,
     pub grace_until: i64,
     pub qualification_progress_units: u64,
+    /// Start of the current partial (<10 units) qualification window.
+    pub qualification_window_started_at: i64,
     pub lifetime_service_units: u128,
     pub next_batch_index: u64,
     pub direct_accrued_usdt: u64,
@@ -50,12 +54,13 @@ pub struct UserState {
     pub lifetime_claimed_usdc: u128,
     pub lifetime_expired_usdt: u128,
     pub lifetime_expired_usdc: u128,
+    /// Pioneer checkpoints use the same PIONEER_SCALE as the global indexes.
     pub pioneer_checkpoint_usdt: u128,
     pub pioneer_checkpoint_usdc: u128,
 }
 
 impl UserState {
-    pub const SPACE: usize = 8 + 1 + 32 + 32 + 8 + 2 + 8 + 8 + 8 + 16 + 8 + (8 * 6) + (16 * 6);
+    pub const SPACE: usize = 283;
     pub fn is_technical_root(&self) -> bool { self.wallet == Pubkey::default() }
 }
 
