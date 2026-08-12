@@ -45,6 +45,7 @@ jobs:
           from pathlib import Path
           p = Path('programs/service_referral_protocol/src/lib.rs')
           s = p.read_text()
+          s = s.replace('pub fn record_qualified_revenue(ctx: Context<RecordQualifiedRevenue>, amount: u64) -> Result<()> {', "pub fn record_qualified_revenue<'info>(ctx: Context<'info, RecordQualifiedRevenue<'info>>, amount: u64) -> Result<()> {")
           s = s.replace('ctx.accounts.token_program.to_account_info(),\n                Transfer {', 'token::ID,\n                Transfer {')
           s = s.replace('token_program.to_account_info(),\n            Transfer {', 'token::ID,\n            Transfer {')
           for i in range(1, 11):
