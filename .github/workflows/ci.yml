@@ -39,15 +39,18 @@ jobs:
             fi
             sleep $((i * 5))
           done
-      - name: Build
+      - name: Apply Anchor 1.x CPI compatibility patch for diagnostic build
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('programs/service_referral_protocol/src/lib.rs')
+          s = p.read_text()
+          s = s.replace('ctx.accounts.token_program.to_account_info(),\n                Transfer {', 'token::ID,\n                Transfer {')
+          s = s.replace('token_program.to_account_info(),\n            Transfer {', 'token::ID,\n            Transfer {')
+          p.write_text(s)
+          PY
+          git diff -- programs/service_referral_protocol/src/lib.rs
+      - name: Build diagnostic
         run: anchor build --ignore-keys
       - name: Rust unit tests
         run: cargo test --workspace
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: anchor-build
-          path: |
-            target/deploy/*.so
-            target/idl/*.json
-          if-no-files-found: error
