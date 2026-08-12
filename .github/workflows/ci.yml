@@ -1,7 +1,8 @@
 name: protocol-ci
 on:
-  push:
   pull_request:
+  push:
+    branches: [main]
 
 permissions:
   contents: read
@@ -44,8 +45,10 @@ jobs:
           done
       - name: Build clean V0.9 source
         run: anchor build --ignore-keys
-      - name: Rust unit tests
+      - name: Program Rust unit tests
         run: cargo test --workspace
+      - name: LiteSVM integration tests
+        run: cargo test --manifest-path integration-tests/Cargo.toml -- --nocapture
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
