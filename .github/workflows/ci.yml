@@ -39,7 +39,7 @@ jobs:
             fi
             sleep $((i * 5))
           done
-      - name: Apply Anchor 1.x CPI compatibility patch for diagnostic build
+      - name: Apply Anchor 1.x compatibility patches for diagnostic build
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -47,6 +47,8 @@ jobs:
           s = p.read_text()
           s = s.replace('ctx.accounts.token_program.to_account_info(),\n                Transfer {', 'token::ID,\n                Transfer {')
           s = s.replace('token_program.to_account_info(),\n            Transfer {', 'token::ID,\n            Transfer {')
+          for i in range(1, 11):
+              s = s.replace(f'ctx.accounts.upline_{i}.to_account_info()', f'ctx.accounts.upline_{i}.as_ref()')
           p.write_text(s)
           PY
           git diff -- programs/service_referral_protocol/src/lib.rs
