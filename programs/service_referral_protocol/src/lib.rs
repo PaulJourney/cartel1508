@@ -16,7 +16,7 @@ pub mod service_referral_protocol {
     use super::*;
 
     pub fn initialize(ctx: Context<Initialize>, registration_open_at: i64, qualified_revenue_source: Pubkey) -> Result<()> {
-        constants::assert_percentages().map_err(|_| ProtocolError::InvalidPercentages)?;
+        require!(constants::percentages_valid(), ProtocolError::InvalidPercentages);
         let now = Clock::get()?.unix_timestamp;
         require!(registration_open_at >= now, ProtocolError::RegistrationOpenInPast);
         require!(qualified_revenue_source != Pubkey::default(), ProtocolError::InvalidRevenueSource);
@@ -118,7 +118,7 @@ pub mod service_referral_protocol {
 
         token::transfer(
             CpiContext::new(
-                ctx.accounts.token_program.to_account_info(),
+                token::ID,
                 Transfer {
                     from: ctx.accounts.user_source.to_account_info(),
                     to: ctx.accounts.service_treasury_token.to_account_info(),
@@ -157,7 +157,7 @@ pub mod service_referral_protocol {
         Ok(())
     }
 
-    pub fn record_qualified_revenue(ctx: Context<RecordQualifiedRevenue>, amount: u64) -> Result<()> {
+    pub fn record_qualified_revenue<'info>(ctx: Context<'info, RecordQualifiedRevenue<'info>>, amount: u64) -> Result<()> {
         require!(amount > 0, ProtocolError::ZeroAmount);
         let now = Clock::get()?.unix_timestamp;
         let p = &mut ctx.accounts.protocol;
@@ -168,7 +168,7 @@ pub mod service_referral_protocol {
 
         token::transfer(
             CpiContext::new(
-                ctx.accounts.token_program.to_account_info(),
+                token::ID,
                 Transfer {
                     from: ctx.accounts.source_token.to_account_info(),
                     to: ctx.accounts.vault_token.to_account_info(),
@@ -182,11 +182,11 @@ pub mod service_referral_protocol {
         add_direct(&mut ctx.accounts.beneficiary, p, ctx.accounts.source_token.mint, direct)?;
 
         let uplines = [
-            ctx.accounts.upline_1.to_account_info(), ctx.accounts.upline_2.to_account_info(),
-            ctx.accounts.upline_3.to_account_info(), ctx.accounts.upline_4.to_account_info(),
-            ctx.accounts.upline_5.to_account_info(), ctx.accounts.upline_6.to_account_info(),
-            ctx.accounts.upline_7.to_account_info(), ctx.accounts.upline_8.to_account_info(),
-            ctx.accounts.upline_9.to_account_info(), ctx.accounts.upline_10.to_account_info(),
+            ctx.accounts.upline_1.as_ref(), ctx.accounts.upline_2.as_ref(),
+            ctx.accounts.upline_3.as_ref(), ctx.accounts.upline_4.as_ref(),
+            ctx.accounts.upline_5.as_ref(), ctx.accounts.upline_6.as_ref(),
+            ctx.accounts.upline_7.as_ref(), ctx.accounts.upline_8.as_ref(),
+            ctx.accounts.upline_9.as_ref(), ctx.accounts.upline_10.as_ref(),
         ];
         let mut expected_wallet = ctx.accounts.beneficiary.referrer;
         let mut treasury_now = service.checked_add(rounding_remainder).ok_or(ProtocolError::ArithmeticOverflow)?;
@@ -501,7 +501,7 @@ fn transfer_from_vault<'info>(
     let signer_seeds: &[&[u8]] = &[b"vault-authority", &bump];
     token::transfer(
         CpiContext::new_with_signer(
-            token_program.to_account_info(),
+            token::ID,
             Transfer {
                 from: vault.to_account_info(),
                 to: destination.to_account_info(),
