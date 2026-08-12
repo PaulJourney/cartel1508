@@ -4,7 +4,7 @@ on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   reference-and-static:
@@ -42,32 +42,15 @@ jobs:
             fi
             sleep $((i * 5))
           done
-      - name: Apply V0.9B migration for diagnostic build
-        run: |
-          python3 scripts/run-v0-9b-migration.py
-          git diff -- programs/service_referral_protocol/src/lib.rs
-      - name: Build V0.9B diagnostic
+      - name: Build clean V0.9 source
         run: anchor build --ignore-keys
       - name: Rust unit tests
         run: cargo test --workspace
-
-  persist-v09b:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/agent/solana-protocol-v0.8'
-    needs: [reference-and-static, anchor-build]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
         with:
-          ref: agent/solana-protocol-v0.8
-      - name: Persist tested V0.9B migration
-        run: |
-          python3 scripts/run-v0-9b-migration.py
-          if git diff --quiet -- programs/service_referral_protocol/src/lib.rs; then
-            echo "V0.9B migration already persisted"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add programs/service_referral_protocol/src/lib.rs
-          git commit -m "implement V0.9B canonical settlement hardening"
-          git push origin HEAD:agent/solana-protocol-v0.8
+          name: anchor-build-v0.9
+          path: |
+            target/deploy/*.so
+            target/idl/*.json
+          if-no-files-found: error
