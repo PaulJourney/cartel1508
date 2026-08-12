@@ -18,15 +18,7 @@ pub const MAINNET_USDT_MINT: Pubkey = pubkey!("Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11M
 pub const MAINNET_USDC_MINT: Pubkey = pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
 pub const MAINNET_SERVICE_TREASURY: Pubkey = pubkey!("AepYo8xanmKuRiLVeYQuCTJoQr1nyKiTApoKwHMEg8fn");
 
-pub fn assert_percentages() -> Result<()> {
-    require!(DIRECT_BPS + NETWORK_BPS + PIONEER_BPS + SERVICE_BPS == BPS_DENOMINATOR, ErrorCode::InvalidPercentages);
-    let sum: u64 = NETWORK_LEVEL_BPS.iter().copied().sum();
-    require!(sum == NETWORK_BPS, ErrorCode::InvalidPercentages);
-    Ok(())
-}
-
-#[error_code]
-pub enum ErrorCode {
-    #[msg("Protocol percentage constants are inconsistent")]
-    InvalidPercentages,
+pub fn percentages_valid() -> bool {
+    DIRECT_BPS + NETWORK_BPS + PIONEER_BPS + SERVICE_BPS == BPS_DENOMINATOR
+        && NETWORK_LEVEL_BPS.iter().copied().sum::<u64>() == NETWORK_BPS
 }
