@@ -1,5 +1,6 @@
 [workspace]
-members = ["programs/service_referral_protocol", "integration-tests"]
+members = ["programs/service_referral_protocol"]
+exclude = ["integration-tests"]
 resolver = "2"
 
 [profile.release]
