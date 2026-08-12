@@ -133,23 +133,22 @@ mod tests {
             .expect("execute initialize")
             .assert_success();
 
-        let register_ix = || {
-            ctx.program()
-                .accounts(service_referral_protocol::accounts::Register {
-                    wallet: user.pubkey(),
-                    protocol: protocol_pda,
-                    referrer_wallet: Pubkey::default(),
-                    referrer: technical_root,
-                    user: user_pda,
-                    system_program: anchor_lang::system_program::ID,
-                })
-                .args(service_referral_protocol::instruction::Register {})
-                .instruction()
-                .expect("build register instruction")
-        };
+        let pre_open_register_ix = ctx
+            .program()
+            .accounts(service_referral_protocol::accounts::Register {
+                wallet: user.pubkey(),
+                protocol: protocol_pda,
+                referrer_wallet: Pubkey::default(),
+                referrer: technical_root,
+                user: user_pda,
+                system_program: anchor_lang::system_program::ID,
+            })
+            .args(service_referral_protocol::instruction::Register {})
+            .instruction()
+            .expect("build pre-open register instruction");
 
         let before_open = ctx
-            .execute_instruction(register_ix(), &[&user])
+            .execute_instruction(pre_open_register_ix, &[&user])
             .expect("execute pre-open register transaction");
         assert!(!before_open.is_success(), "registration must fail before open time");
         assert!(ctx.svm.get_account(&user_pda).is_none());
@@ -157,7 +156,21 @@ mod tests {
         clock.unix_timestamp = registration_open_at;
         ctx.svm.set_sysvar(&clock);
 
-        ctx.execute_instruction(register_ix(), &[&user])
+        let open_register_ix = ctx
+            .program()
+            .accounts(service_referral_protocol::accounts::Register {
+                wallet: user.pubkey(),
+                protocol: protocol_pda,
+                referrer_wallet: Pubkey::default(),
+                referrer: technical_root,
+                user: user_pda,
+                system_program: anchor_lang::system_program::ID,
+            })
+            .args(service_referral_protocol::instruction::Register {})
+            .instruction()
+            .expect("build open register instruction");
+
+        ctx.execute_instruction(open_register_ix, &[&user])
             .expect("execute open register transaction")
             .assert_success();
 
