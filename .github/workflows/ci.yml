@@ -44,7 +44,7 @@ jobs:
           done
       - name: Apply V0.9B migration for diagnostic build
         run: |
-          python3 scripts/migrate-v0-9b.py
+          python3 scripts/run-v0-9b-migration.py
           git diff -- programs/service_referral_protocol/src/lib.rs
       - name: Build V0.9B diagnostic
         run: anchor build --ignore-keys
@@ -61,7 +61,7 @@ jobs:
           ref: agent/solana-protocol-v0.8
       - name: Persist tested V0.9B migration
         run: |
-          python3 scripts/migrate-v0-9b.py
+          python3 scripts/run-v0-9b-migration.py
           if git diff --quiet -- programs/service_referral_protocol/src/lib.rs; then
             echo "V0.9B migration already persisted"
             exit 0
