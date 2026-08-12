@@ -18,16 +18,21 @@ pub struct ProtocolState {
     /// Fractional unassigned Pioneer value not yet transferable as a whole token atom.
     pub pioneer_unassigned_remainder_usdt_scaled: u128,
     pub pioneer_unassigned_remainder_usdc_scaled: u128,
+    /// Treasury accounting buckets are intentionally separate for auditability.
     pub lifetime_service_fees_usdt: u128,
     pub lifetime_service_fees_usdc: u128,
     pub lifetime_unallocated_usdt: u128,
     pub lifetime_unallocated_usdc: u128,
     pub lifetime_expired_usdt: u128,
     pub lifetime_expired_usdc: u128,
+    pub lifetime_rounding_usdt: u128,
+    pub lifetime_rounding_usdc: u128,
+    pub lifetime_pioneer_unassigned_usdt: u128,
+    pub lifetime_pioneer_unassigned_usdc: u128,
 }
 
 impl ProtocolState {
-    pub const SPACE: usize = 324;
+    pub const SPACE: usize = 388;
 }
 
 #[account]
