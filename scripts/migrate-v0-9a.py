@@ -52,9 +52,10 @@ new_purchase = """        user.lifetime_service_units = last;
             if was_grace { vest_pending(user)?; }
         }
 """
-if old_purchase not in s:
+if old_purchase in s:
+    s = s.replace(old_purchase, new_purchase)
+elif new_purchase not in s:
     raise SystemExit("purchase activity block not found")
-s = s.replace(old_purchase, new_purchase)
 
 # Pioneer accrual now uses a high precision per-share index and immediately routes
 # whole atomic units belonging to unassigned virtual shares to treasury.
@@ -67,9 +68,10 @@ new_accrue_call = """        let pioneer_unassigned_now = accrue_pioneer(p, ctx.
 
         if treasury_now > 0 {
 """
-if old_accrue_call not in s:
+if old_accrue_call in s:
+    s = s.replace(old_accrue_call, new_accrue_call)
+elif new_accrue_call not in s:
     raise SystemExit("pioneer accrue call not found")
-s = s.replace(old_accrue_call, new_accrue_call)
 
 start = s.index("fn accrue_pioneer(")
 end = s.index("fn take_claimable(")
@@ -119,10 +121,10 @@ fn checkpoint_pioneer_claimed(user: &mut UserState, p: &ProtocolState, mint: Pub
     let advance_scaled = (claimed as u128).checked_mul(PIONEER_SCALE).ok_or(ProtocolError::ArithmeticOverflow)?;
     if mint == p.usdt_mint {
         user.pioneer_checkpoint_usdt = user.pioneer_checkpoint_usdt.checked_add(advance_scaled).ok_or(ProtocolError::ArithmeticOverflow)?;
-        require!(user.pioneer_checkpoint_usdt <= p.pioneer_index_usdt, ProtocolError::ArithmeticOverflow);
+        require!(user.pioneer_checkpoint_usdt <= p.pioneer_index_usdt, ProtocolError::ArithmeticUnderflow);
     } else if mint == p.usdc_mint {
         user.pioneer_checkpoint_usdc = user.pioneer_checkpoint_usdc.checked_add(advance_scaled).ok_or(ProtocolError::ArithmeticOverflow)?;
-        require!(user.pioneer_checkpoint_usdc <= p.pioneer_index_usdc, ProtocolError::ArithmeticOverflow);
+        require!(user.pioneer_checkpoint_usdc <= p.pioneer_index_usdc, ProtocolError::ArithmeticUnderflow);
     } else { return err!(ProtocolError::UnsupportedToken); }
     Ok(())
 }
