@@ -18,22 +18,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Solana / Agave 3.1.10
+      - name: Setup pinned Solana and Anchor toolchain
+        uses: solana-foundation/github-actions/setup-all@v0.2.15
+        with:
+          solana_version: '3.1.10'
+          anchor_version: '1.1.2'
+          node_version: '24'
+      - name: Tool versions
         run: |
-          sh -c "$(curl -sSfL https://release.anza.xyz/v3.1.10/install)"
-          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-      - name: Install Anchor CLI 1.1.2 from source
-        run: |
-          export PATH="$HOME/.cargo/bin:$HOME/.local/share/solana/install/active_release/bin:$PATH"
-          cargo install --git https://github.com/solana-foundation/anchor --tag v1.1.2 anchor-cli --locked
-          anchor --version
           solana --version
+          anchor --version
           rustc --version
       - name: Build
-        run: |
-          export PATH="$HOME/.cargo/bin:$HOME/.local/share/solana/install/active_release/bin:$PATH"
-          anchor build
+        run: anchor build
       - name: Rust unit tests
         run: cargo test --workspace
       - name: Upload build artifacts
