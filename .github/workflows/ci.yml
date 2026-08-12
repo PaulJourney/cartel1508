@@ -3,6 +3,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: write
+
 jobs:
   reference-and-static:
     runs-on: ubuntu-latest
@@ -41,20 +44,30 @@ jobs:
           done
       - name: Apply Anchor 1.x compatibility patches for diagnostic build
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('programs/service_referral_protocol/src/lib.rs')
-          s = p.read_text()
-          s = s.replace('constants::assert_percentages().map_err(|_| ProtocolError::InvalidPercentages)?;', 'require!(constants::percentages_valid(), ProtocolError::InvalidPercentages);')
-          s = s.replace('pub fn record_qualified_revenue(ctx: Context<RecordQualifiedRevenue>, amount: u64) -> Result<()> {', "pub fn record_qualified_revenue<'info>(ctx: Context<'info, RecordQualifiedRevenue<'info>>, amount: u64) -> Result<()> {")
-          s = s.replace('ctx.accounts.token_program.to_account_info(),\n                Transfer {', 'token::ID,\n                Transfer {')
-          s = s.replace('token_program.to_account_info(),\n            Transfer {', 'token::ID,\n            Transfer {')
-          for i in range(1, 11):
-              s = s.replace(f'ctx.accounts.upline_{i}.to_account_info()', f'ctx.accounts.upline_{i}.as_ref()')
-          p.write_text(s)
-          PY
+          python3 scripts/migrate-anchor-1-1.py
           git diff -- programs/service_referral_protocol/src/lib.rs
       - name: Build diagnostic
         run: anchor build --ignore-keys
       - name: Rust unit tests
         run: cargo test --workspace
+
+  persist-anchor-migration:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/agent/solana-protocol-v0.8'
+    needs: [reference-and-static, anchor-build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/solana-protocol-v0.8
+      - name: Persist tested Anchor migration
+        run: |
+          python3 scripts/migrate-anchor-1-1.py
+          if git diff --quiet -- programs/service_referral_protocol/src/lib.rs; then
+            echo "Anchor migration already persisted"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add programs/service_referral_protocol/src/lib.rs
+          git commit -m "migrate protocol source to Anchor 1.1.2"
+          git push origin HEAD:agent/solana-protocol-v0.8
