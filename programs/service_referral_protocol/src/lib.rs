@@ -34,8 +34,8 @@ pub mod service_referral_protocol {
         p.real_user_count = 0;
         p.pioneer_index_usdt = 0;
         p.pioneer_index_usdc = 0;
-        p.pioneer_reserve_usdt = 0;
-        p.pioneer_reserve_usdc = 0;
+        p.pioneer_unassigned_remainder_usdt_scaled = 0;
+        p.pioneer_unassigned_remainder_usdc_scaled = 0;
         p.lifetime_service_fees_usdt = 0;
         p.lifetime_service_fees_usdc = 0;
         p.lifetime_unallocated_usdt = 0;
@@ -52,6 +52,7 @@ pub mod service_referral_protocol {
         root.active_until = 0;
         root.grace_until = 0;
         root.qualification_progress_units = 0;
+        root.qualification_window_started_at = 0;
         root.lifetime_service_units = 0;
         root.next_batch_index = 0;
         root.direct_accrued_usdt = 0;
@@ -91,6 +92,7 @@ pub mod service_referral_protocol {
         u.active_until = 0;
         u.grace_until = 0;
         u.qualification_progress_units = 0;
+        u.qualification_window_started_at = 0;
         u.lifetime_service_units = 0;
         u.next_batch_index = 0;
         u.direct_accrued_usdt = 0;
@@ -135,11 +137,23 @@ pub mod service_referral_protocol {
         let last = user.lifetime_service_units.checked_add(units as u128).ok_or(ProtocolError::ArithmeticOverflow)?;
         user.lifetime_service_units = last;
         user.next_batch_index = user.next_batch_index.checked_add(1).ok_or(ProtocolError::ArithmeticOverflow)?;
+
+        if user.qualification_progress_units > 0
+            && user.qualification_window_started_at > 0
+            && now > user.qualification_window_started_at.checked_add(ACTIVE_SECONDS).ok_or(ProtocolError::ArithmeticOverflow)?
+        {
+            user.qualification_progress_units = 0;
+            user.qualification_window_started_at = 0;
+        }
+        if user.qualification_progress_units == 0 {
+            user.qualification_window_started_at = now;
+        }
         user.qualification_progress_units = user.qualification_progress_units.checked_add(units).ok_or(ProtocolError::ArithmeticOverflow)?;
 
         if user.qualification_progress_units >= ACTIVITY_THRESHOLD_UNITS {
             let was_grace = activity_status(user, now) == ActivityStatus::Grace;
             user.qualification_progress_units = 0;
+            user.qualification_window_started_at = 0;
             user.active_until = now.checked_add(ACTIVE_SECONDS).ok_or(ProtocolError::ArithmeticOverflow)?;
             user.grace_until = user.active_until.checked_add(GRACE_SECONDS).ok_or(ProtocolError::ArithmeticOverflow)?;
             if was_grace { vest_pending(user)?; }
@@ -218,7 +232,8 @@ pub mod service_referral_protocol {
             upline.exit(&crate::ID)?;
         }
 
-        accrue_pioneer(p, ctx.accounts.source_token.mint, pioneer)?;
+        let pioneer_unassigned_now = accrue_pioneer(p, ctx.accounts.source_token.mint, pioneer)?;
+        treasury_now = treasury_now.checked_add(pioneer_unassigned_now).ok_or(ProtocolError::ArithmeticOverflow)?;
 
         if treasury_now > 0 {
             transfer_from_vault(
@@ -249,7 +264,7 @@ pub mod service_referral_protocol {
             .checked_add(pioneer_due).ok_or(ProtocolError::ArithmeticOverflow)?;
         require!(total > 0, ProtocolError::NothingToClaim);
 
-        checkpoint_pioneer(user, p, mint)?;
+        checkpoint_pioneer_claimed(user, p, mint, pioneer_due)?;
         transfer_from_vault(p, &ctx.accounts.vault_authority, &ctx.accounts.vault_token, &ctx.accounts.destination, &ctx.accounts.token_program, total)?;
         if mint == p.usdt_mint {
             user.lifetime_claimed_usdt = user.lifetime_claimed_usdt.checked_add(total as u128).ok_or(ProtocolError::ArithmeticOverflow)?;
@@ -420,19 +435,33 @@ fn settle_expired_in_memory(user: &mut UserState, now: i64, p: &mut ProtocolStat
     Ok(())
 }
 
-fn accrue_pioneer(p: &mut ProtocolState, mint: Pubkey, amount: u64) -> Result<()> {
-    let per_share = amount / (PIONEER_SLOTS as u64);
-    let remainder = amount % (PIONEER_SLOTS as u64);
-    let unassigned = (PIONEER_SLOTS - p.pioneer_count) as u64;
-    let reserve_add = per_share.checked_mul(unassigned).ok_or(ProtocolError::ArithmeticOverflow)?.checked_add(remainder).ok_or(ProtocolError::ArithmeticOverflow)?;
-    if mint == p.usdt_mint {
-        p.pioneer_index_usdt = p.pioneer_index_usdt.checked_add(per_share as u128).ok_or(ProtocolError::ArithmeticOverflow)?;
-        p.pioneer_reserve_usdt = p.pioneer_reserve_usdt.checked_add(reserve_add).ok_or(ProtocolError::ArithmeticOverflow)?;
+fn accrue_pioneer(p: &mut ProtocolState, mint: Pubkey, amount: u64) -> Result<u64> {
+    let per_share_scaled = (amount as u128)
+        .checked_mul(PIONEER_SCALE).ok_or(ProtocolError::ArithmeticOverflow)?
+        .checked_div(PIONEER_SLOTS as u128).ok_or(ProtocolError::ArithmeticUnderflow)?;
+    let unassigned = (PIONEER_SLOTS - p.pioneer_count) as u128;
+    let unassigned_scaled = per_share_scaled.checked_mul(unassigned).ok_or(ProtocolError::ArithmeticOverflow)?;
+
+    let remainder_scaled = if mint == p.usdt_mint {
+        p.pioneer_index_usdt = p.pioneer_index_usdt.checked_add(per_share_scaled).ok_or(ProtocolError::ArithmeticOverflow)?;
+        p.pioneer_unassigned_remainder_usdt_scaled
+            .checked_add(unassigned_scaled).ok_or(ProtocolError::ArithmeticOverflow)?
     } else if mint == p.usdc_mint {
-        p.pioneer_index_usdc = p.pioneer_index_usdc.checked_add(per_share as u128).ok_or(ProtocolError::ArithmeticOverflow)?;
-        p.pioneer_reserve_usdc = p.pioneer_reserve_usdc.checked_add(reserve_add).ok_or(ProtocolError::ArithmeticOverflow)?;
-    } else { return err!(ProtocolError::UnsupportedToken); }
-    Ok(())
+        p.pioneer_index_usdc = p.pioneer_index_usdc.checked_add(per_share_scaled).ok_or(ProtocolError::ArithmeticOverflow)?;
+        p.pioneer_unassigned_remainder_usdc_scaled
+            .checked_add(unassigned_scaled).ok_or(ProtocolError::ArithmeticOverflow)?
+    } else {
+        return err!(ProtocolError::UnsupportedToken);
+    };
+
+    let whole_atomic = remainder_scaled / PIONEER_SCALE;
+    let fractional_scaled = remainder_scaled % PIONEER_SCALE;
+    if mint == p.usdt_mint {
+        p.pioneer_unassigned_remainder_usdt_scaled = fractional_scaled;
+    } else {
+        p.pioneer_unassigned_remainder_usdc_scaled = fractional_scaled;
+    }
+    u64::try_from(whole_atomic).map_err(|_| ProtocolError::ArithmeticOverflow.into())
 }
 
 fn pioneer_due(user: &UserState, p: &ProtocolState, mint: Pubkey) -> Result<u64> {
@@ -442,14 +471,21 @@ fn pioneer_due(user: &UserState, p: &ProtocolState, mint: Pubkey) -> Result<u64>
     } else if mint == p.usdc_mint {
         (p.pioneer_index_usdc, user.pioneer_checkpoint_usdc)
     } else { return err!(ProtocolError::UnsupportedToken); };
-    let diff = idx.checked_sub(checkpoint).ok_or(ProtocolError::ArithmeticUnderflow)?;
-    u64::try_from(diff).map_err(|_| ProtocolError::ArithmeticOverflow.into())
+    let diff_scaled = idx.checked_sub(checkpoint).ok_or(ProtocolError::ArithmeticUnderflow)?;
+    let due = diff_scaled / PIONEER_SCALE;
+    u64::try_from(due).map_err(|_| ProtocolError::ArithmeticOverflow.into())
 }
 
-fn checkpoint_pioneer(user: &mut UserState, p: &ProtocolState, mint: Pubkey) -> Result<()> {
-    if mint == p.usdt_mint { user.pioneer_checkpoint_usdt = p.pioneer_index_usdt; }
-    else if mint == p.usdc_mint { user.pioneer_checkpoint_usdc = p.pioneer_index_usdc; }
-    else { return err!(ProtocolError::UnsupportedToken); }
+fn checkpoint_pioneer_claimed(user: &mut UserState, p: &ProtocolState, mint: Pubkey, claimed: u64) -> Result<()> {
+    if user.pioneer_id == 0 || claimed == 0 { return Ok(()); }
+    let advance_scaled = (claimed as u128).checked_mul(PIONEER_SCALE).ok_or(ProtocolError::ArithmeticOverflow)?;
+    if mint == p.usdt_mint {
+        user.pioneer_checkpoint_usdt = user.pioneer_checkpoint_usdt.checked_add(advance_scaled).ok_or(ProtocolError::ArithmeticOverflow)?;
+        require!(user.pioneer_checkpoint_usdt <= p.pioneer_index_usdt, ProtocolError::ArithmeticUnderflow);
+    } else if mint == p.usdc_mint {
+        user.pioneer_checkpoint_usdc = user.pioneer_checkpoint_usdc.checked_add(advance_scaled).ok_or(ProtocolError::ArithmeticOverflow)?;
+        require!(user.pioneer_checkpoint_usdc <= p.pioneer_index_usdc, ProtocolError::ArithmeticUnderflow);
+    } else { return err!(ProtocolError::UnsupportedToken); }
     Ok(())
 }
 
