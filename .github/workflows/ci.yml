@@ -5,7 +5,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   reference-and-static:
@@ -22,8 +22,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
       - name: Setup pinned Solana and Anchor toolchain
         uses: solana-foundation/github-actions/setup-all@v0.2.15
         with:
@@ -45,53 +43,14 @@ jobs:
             fi
             sleep $((i * 5))
           done
-      - name: Normalize stack-safe source and LiteSVM compatibility
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          program = Path('programs/service_referral_protocol/src/lib.rs')
-          s = program.read_text()
-          type_replacements = [
-              ("Account<'info, ProtocolState>", "Box<Account<'info, ProtocolState>>"),
-              ("Account<'info, UserState>", "Box<Account<'info, UserState>>"),
-              ("Account<'info, TokenAccount>", "Box<Account<'info, TokenAccount>>"),
-              ("Account<'info, UnitBatch>", "Box<Account<'info, UnitBatch>>"),
-          ]
-          for old, new in type_replacements:
-              s = s.replace(old, new)
-          program.write_text(s)
-
-          tests = Path('integration-tests/src/lib.rs')
-          t = tests.read_text()
-          t = t.replace(
-              'let registration_open_at = ctx.svm.get_unix_timestamp();',
-              'let registration_open_at = ctx.svm.get_sysvar::<Clock>().unix_timestamp;',
-          )
-          marker = '        ctx.svm.set_sysvar(&clock);\n\n        let open_register_ix = ctx'
-          replacement = '        ctx.svm.set_sysvar(&clock);\n        ctx.svm.expire_blockhash();\n\n        let open_register_ix = ctx'
-          if marker in t:
-              t = t.replace(marker, replacement, 1)
-          tests.write_text(t)
-          PY
-      - name: Build V0.9 source
+      - name: Build checked-in V0.9 source
         run: anchor build --ignore-keys
       - name: Program Rust unit tests
         run: cargo test --workspace
       - name: LiteSVM integration tests
         run: cargo test --manifest-path integration-tests/Cargo.toml -- --nocapture
-      - name: Persist validated source normalization
-        if: github.event_name == 'pull_request'
-        run: |
-          if git diff --quiet -- programs/service_referral_protocol/src/lib.rs integration-tests/src/lib.rs; then
-            echo "Source already normalized"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add programs/service_referral_protocol/src/lib.rs integration-tests/src/lib.rs
-          git commit -m "make stack-safe Anchor accounts permanent"
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+      - name: Ensure CI did not mutate checked-in source
+        run: git diff --exit-code
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
