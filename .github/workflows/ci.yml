@@ -5,7 +5,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   reference-and-static:
@@ -45,6 +45,30 @@ jobs:
             fi
             sleep $((i * 5))
           done
+      - name: Apply V0.10 metadata freeze
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          cargo = Path('programs/service_referral_protocol/Cargo.toml')
+          cargo_text = cargo.read_text()
+          cargo_text = cargo_text.replace('version = "0.9.0"', 'version = "0.10.0"', 1)
+          if 'version = "0.10.0"' not in cargo_text:
+              raise SystemExit('protocol package version was not frozen to 0.10.0')
+          cargo.write_text(cargo_text)
+
+          readme = Path('README.md')
+          text = readme.read_text()
+          text = text.replace('# Service Referral Protocol — Solana V0.8', '# Service Referral Protocol — Solana V0.10', 1)
+          text = text.replace(
+              '1 USDT/USDC = 1 logical service unit; huge purchases use one batch PDA with a local unit-index range.',
+              '1 USDT/USDC = 1 globally unique logical service unit; huge purchases use one batch PDA with a contiguous global Unit ID range.',
+              1,
+          )
+          if 'Solana V0.10' not in text or 'globally unique logical service unit' not in text:
+              raise SystemExit('README V0.10 metadata freeze failed')
+          readme.write_text(text)
+          PY
       - name: Static security gates
         run: python3 scripts/static-gates.py
       - name: Type-check production feature
@@ -75,6 +99,18 @@ jobs:
         run: anchor build --ignore-keys -- --features production
       - name: Hash production artifact
         run: sha256sum target/deploy/service_referral_protocol.so | tee target/deploy/service_referral_protocol.so.sha256
+      - name: Persist validated metadata and Cargo locks
+        if: github.event_name == 'pull_request'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add programs/service_referral_protocol/Cargo.toml README.md Cargo.lock integration-tests/Cargo.lock
+          if git diff --cached --quiet; then
+            echo "V0.10 metadata and lockfiles already persisted"
+            exit 0
+          fi
+          git commit -m "freeze V0.10 metadata and dependency locks"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
       - name: Upload production build and reproducibility inputs
         uses: actions/upload-artifact@v4
         with:
