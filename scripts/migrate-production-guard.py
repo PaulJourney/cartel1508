@@ -45,7 +45,7 @@ if helper_marker not in source[source.find('}\n\n#[derive(Accounts)]') if '}\n\n
         raise SystemExit('ProtocolError anchor missing')
     source = source.replace(error_anchor, helper + error_anchor, 1)
 
-if 'ProductionConfigNotFrozen' not in source:
+if '    ProductionConfigNotFrozen,' not in source or '    InvalidProductionConfig,' not in source:
     error_anchor = '    #[msg("Nothing to claim")] NothingToClaim,\n'
     if error_anchor not in source:
         raise SystemExit('ProtocolError tail anchor missing')
