@@ -48,7 +48,11 @@ jobs:
       - name: Program Rust unit tests
         run: cargo test --workspace
       - name: LiteSVM integration tests
-        run: cargo test --manifest-path integration-tests/Cargo.toml -- --nocapture
+        run: |
+          # LiteSVM 0.11 exposes the current timestamp through the Clock sysvar.
+          # Keep this compatibility substitution here until the test source cleanup commit.
+          sed -i 's/ctx\.svm\.get_unix_timestamp()/ctx.svm.get_sysvar::<Clock>().unix_timestamp/g' integration-tests/src/lib.rs
+          cargo test --manifest-path integration-tests/Cargo.toml -- --nocapture
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
