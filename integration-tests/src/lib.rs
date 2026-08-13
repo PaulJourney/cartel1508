@@ -347,7 +347,7 @@ mod tests {
         assert_eq!(batch.batch_index, 0);
         assert_eq!(batch.mint, usdt_mint.pubkey());
         assert_eq!(batch.units, 10);
-        assert_eq!(batch.first_local_unit_index, 1);
-        assert_eq!(batch.last_local_unit_index, 10);
+        assert_eq!(batch.first_unit_id, 1);
+        assert_eq!(batch.last_unit_id, 10);
     }
 }

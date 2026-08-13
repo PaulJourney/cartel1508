@@ -43,6 +43,7 @@ pub mod service_referral_protocol {
         p.usdc_mint = ctx.accounts.usdc_mint.key();
         p.pioneer_count = 0;
         p.real_user_count = 0;
+        p.next_unit_id = 1;
         p.pioneer_index_usdt = 0;
         p.pioneer_index_usdc = 0;
         p.pioneer_unassigned_remainder_usdt_scaled = 0;
@@ -168,10 +169,13 @@ pub mod service_referral_protocol {
             payment,
         )?;
 
+        let (first_unit_id, last_unit_id, next_unit_id) =
+            allocate_unit_range(ctx.accounts.protocol.next_unit_id, units)?;
+        ctx.accounts.protocol.next_unit_id = next_unit_id;
+
         let user = &mut ctx.accounts.user;
-        let first = user.lifetime_service_units.checked_add(1).ok_or(ProtocolError::ArithmeticOverflow)?;
-        let last = user.lifetime_service_units.checked_add(units as u128).ok_or(ProtocolError::ArithmeticOverflow)?;
-        user.lifetime_service_units = last;
+        user.lifetime_service_units = user.lifetime_service_units
+            .checked_add(units as u128).ok_or(ProtocolError::ArithmeticOverflow)?;
         user.next_batch_index = user.next_batch_index.checked_add(1).ok_or(ProtocolError::ArithmeticOverflow)?;
 
         if user.qualification_progress_units > 0
@@ -200,8 +204,8 @@ pub mod service_referral_protocol {
         batch.batch_index = user.next_batch_index - 1;
         batch.mint = ctx.accounts.user_source.mint;
         batch.units = units;
-        batch.first_local_unit_index = first;
-        batch.last_local_unit_index = last;
+        batch.first_unit_id = first_unit_id;
+        batch.last_unit_id = last_unit_id;
         batch.purchased_at = now;
         Ok(())
     }
