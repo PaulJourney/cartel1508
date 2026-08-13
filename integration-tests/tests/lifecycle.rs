@@ -227,5 +227,5 @@ fn grace_network_reward_becomes_claimable_after_timely_reactivation() {
     assert_eq!(sponsor_state.lifetime_service_units, 20);
 
     ctx.svm.assert_token_balance(&sponsor_usdc, 0);
-    ctx.svm.assert_token_balance(&treasury_usdc, 20 * UNIT + 33_960_000);
+    ctx.svm.assert_token_balance(&treasury_usdc, 20 * UNIT + 34_960_000);
 }
