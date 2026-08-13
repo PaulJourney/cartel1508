@@ -43,6 +43,7 @@ checks = {
     'initialization uses typed SPL Mint accounts': "pub usdt_mint: Box<Account<'info, Mint>>" in source and "pub usdc_mint: Box<Account<'info, Mint>>" in source,
     'stablecoin mints require six decimals': source.count('decimals == TOKEN_DECIMALS as u8') >= 2 and 'InvalidTokenDecimals' in source,
     'USDT and USDC mint accounts must differ': 'usdt_mint.key() != ctx.accounts.usdc_mint.key()' in source and 'DuplicateStablecoinMint' in source,
+    'service units use global monotonic Unit IDs': all(x in state for x in ['next_unit_id', 'first_unit_id', 'last_unit_id']) and 'allocate_unit_range(ctx.accounts.protocol.next_unit_id, units)' in purchase and 'ctx.accounts.protocol.next_unit_id = next_unit_id' in purchase and 'first_local_unit_index' not in source and 'last_local_unit_index' not in source,
 }
 
 for name, ok in checks.items():
