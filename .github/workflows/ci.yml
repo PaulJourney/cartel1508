@@ -59,21 +59,8 @@ jobs:
                   raise SystemExit('initialize Unit ID anchor mismatch')
               source = source.replace(init_old, init_new, 1)
 
-          purchase_old = '''        let user = &mut ctx.accounts.user;
-          let first = user.lifetime_service_units.checked_add(1).ok_or(ProtocolError::ArithmeticOverflow)?;
-          let last = user.lifetime_service_units.checked_add(units as u128).ok_or(ProtocolError::ArithmeticOverflow)?;
-          user.lifetime_service_units = last;
-          user.next_batch_index = user.next_batch_index.checked_add(1).ok_or(ProtocolError::ArithmeticOverflow)?;
-          '''
-          purchase_new = '''        let (first_unit_id, last_unit_id, next_unit_id) =
-              allocate_unit_range(ctx.accounts.protocol.next_unit_id, units)?;
-          ctx.accounts.protocol.next_unit_id = next_unit_id;
-
-          let user = &mut ctx.accounts.user;
-          user.lifetime_service_units = user.lifetime_service_units
-              .checked_add(units as u128).ok_or(ProtocolError::ArithmeticOverflow)?;
-          user.next_batch_index = user.next_batch_index.checked_add(1).ok_or(ProtocolError::ArithmeticOverflow)?;
-          '''
+          purchase_old = '        let user = &mut ctx.accounts.user;\n        let first = user.lifetime_service_units.checked_add(1).ok_or(ProtocolError::ArithmeticOverflow)?;\n        let last = user.lifetime_service_units.checked_add(units as u128).ok_or(ProtocolError::ArithmeticOverflow)?;\n        user.lifetime_service_units = last;\n        user.next_batch_index = user.next_batch_index.checked_add(1).ok_or(ProtocolError::ArithmeticOverflow)?;\n'
+          purchase_new = '        let (first_unit_id, last_unit_id, next_unit_id) =\n            allocate_unit_range(ctx.accounts.protocol.next_unit_id, units)?;\n        ctx.accounts.protocol.next_unit_id = next_unit_id;\n\n        let user = &mut ctx.accounts.user;\n        user.lifetime_service_units = user.lifetime_service_units\n            .checked_add(units as u128).ok_or(ProtocolError::ArithmeticOverflow)?;\n        user.next_batch_index = user.next_batch_index.checked_add(1).ok_or(ProtocolError::ArithmeticOverflow)?;\n'
           if 'allocate_unit_range(ctx.accounts.protocol.next_unit_id, units)' not in source:
               if source.count(purchase_old) != 1:
                   raise SystemExit('purchase Unit ID anchor mismatch')
