@@ -33,10 +33,8 @@ new_accounts = (
     '    /// Canonical SPL mint; initialization also enforces six decimals.\n'
     "    pub usdt_mint: Box<Account<'info, Mint>>,\n"
     '    /// Canonical SPL mint; initialization also enforces six decimals.\n'
-    "    pub usdc_mint: Box<Account<'info, Mint>>,“
+    "    pub usdc_mint: Box<Account<'info, Mint>>," 
 )
-# Normalize accidental smart quote defensively before use.
-new_accounts = new_accounts.replace(',“', ',')
 if old_accounts in source:
     source = source.replace(old_accounts, new_accounts, 1)
 elif "pub usdt_mint: Box<Account<'info, Mint>>" not in source or "pub usdc_mint: Box<Account<'info, Mint>>" not in source:
