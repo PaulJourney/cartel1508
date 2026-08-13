@@ -60,13 +60,13 @@ jobs:
       - name: Persist validated mint hardening
         if: github.event_name == 'pull_request'
         run: |
-          if git diff --quiet -- programs/service_referral_protocol/src/lib.rs scripts/static-gates.py; then
+          if git diff --quiet -- programs/service_referral_protocol/src/lib.rs scripts/static-gates.py integration-tests/src/lib.rs; then
             echo "Mint hardening already persisted"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add programs/service_referral_protocol/src/lib.rs scripts/static-gates.py
+          git add programs/service_referral_protocol/src/lib.rs scripts/static-gates.py integration-tests/src/lib.rs
           git commit -m "enforce typed six-decimal stablecoin mints"
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
       - name: Upload build artifacts
