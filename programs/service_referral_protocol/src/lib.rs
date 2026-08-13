@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 use anchor_spl::associated_token::get_associated_token_address_with_program_id;
-use anchor_spl::token::{self, Token, TokenAccount, Transfer};
+use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
 
 pub mod constants;
 pub mod math;
@@ -18,6 +18,9 @@ pub mod service_referral_protocol {
 
     pub fn initialize(ctx: Context<Initialize>, registration_open_at: i64, qualified_revenue_source: Pubkey) -> Result<()> {
         require!(constants::percentages_valid(), ProtocolError::InvalidPercentages);
+        require!(ctx.accounts.usdt_mint.decimals == TOKEN_DECIMALS as u8, ProtocolError::InvalidTokenDecimals);
+        require!(ctx.accounts.usdc_mint.decimals == TOKEN_DECIMALS as u8, ProtocolError::InvalidTokenDecimals);
+        require!(ctx.accounts.usdt_mint.key() != ctx.accounts.usdc_mint.key(), ProtocolError::DuplicateStablecoinMint);
         validate_initialization_environment(
             ctx.accounts.service_treasury.key(),
             ctx.accounts.usdt_mint.key(),
@@ -343,10 +346,10 @@ pub struct Initialize<'info> {
     #[account(mut)] pub initializer: Signer<'info>,
     /// CHECK: immutable treasury address stored in ProtocolState.
     pub service_treasury: UncheckedAccount<'info>,
-    /// CHECK: mint key stored in ProtocolState.
-    pub usdt_mint: UncheckedAccount<'info>,
-    /// CHECK: mint key stored in ProtocolState.
-    pub usdc_mint: UncheckedAccount<'info>,
+    /// Canonical SPL mint; initialization also enforces six decimals.
+    pub usdt_mint: Box<Account<'info, Mint>>,
+    /// Canonical SPL mint; initialization also enforces six decimals.
+    pub usdc_mint: Box<Account<'info, Mint>>,
     #[account(init, payer = initializer, seeds = [b"protocol"], bump, space = ProtocolState::SPACE)]
     pub protocol: Box<Account<'info, ProtocolState>>,
     /// CHECK: PDA authority has no private key.
@@ -755,4 +758,6 @@ pub enum ProtocolError {
     #[msg("Nothing to claim")] NothingToClaim,
     #[msg("Production source/time configuration has not been frozen")] ProductionConfigNotFrozen,
     #[msg("Production initialization does not match frozen mainnet configuration")] InvalidProductionConfig,
+    #[msg("Supported stablecoin mint must use six decimals")] InvalidTokenDecimals,
+    #[msg("USDT and USDC mint accounts must be distinct")] DuplicateStablecoinMint,
 }

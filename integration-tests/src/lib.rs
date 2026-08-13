@@ -22,8 +22,8 @@ mod tests {
             .expect("fund initializer");
 
         let service_treasury = Pubkey::new_unique();
-        let usdt_mint = Pubkey::new_unique();
-        let usdc_mint = Pubkey::new_unique();
+        let usdt_mint = ctx.svm.create_token_mint(&initializer, 6).expect("create USDT mint").pubkey();
+        let usdc_mint = ctx.svm.create_token_mint(&initializer, 6).expect("create USDC mint").pubkey();
         let qualified_revenue_source = Pubkey::new_unique();
 
         let (protocol_pda, _) = Pubkey::find_program_address(&[b"protocol"], &ID);
@@ -100,8 +100,8 @@ mod tests {
             .expect("fund user");
 
         let service_treasury = Pubkey::new_unique();
-        let usdt_mint = Pubkey::new_unique();
-        let usdc_mint = Pubkey::new_unique();
+        let usdt_mint = ctx.svm.create_token_mint(&initializer, 6).expect("create USDT mint").pubkey();
+        let usdc_mint = ctx.svm.create_token_mint(&initializer, 6).expect("create USDC mint").pubkey();
         let qualified_revenue_source = Pubkey::new_unique();
 
         let (protocol_pda, _) = Pubkey::find_program_address(&[b"protocol"], &ID);
