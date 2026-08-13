@@ -50,20 +50,16 @@ jobs:
 
           program = Path('programs/service_referral_protocol/src/lib.rs')
           s = program.read_text()
-          replacements = {
-              "#[account(mut, seeds = [b\"protocol\"], bump = protocol.bump)] pub protocol: Account<'info, ProtocolState>,\n    #[account(mut, seeds = [b\"user\", wallet.key().as_ref()], bump = user.bump)] pub user: Account<'info, UserState>,\n    #[account(mut)] pub user_source: Account<'info, TokenAccount>,":
-              "#[account(mut, seeds = [b\"protocol\"], bump = protocol.bump)] pub protocol: Box<Account<'info, ProtocolState>>,\n    #[account(mut, seeds = [b\"user\", wallet.key().as_ref()], bump = user.bump)] pub user: Box<Account<'info, UserState>>,\n    #[account(mut)] pub user_source: Box<Account<'info, TokenAccount>>,",
-              "#[account(mut)] pub usdt_vault: Account<'info, TokenAccount>,\n    #[account(mut)] pub usdc_vault: Account<'info, TokenAccount>,\n    #[account(mut)] pub service_treasury_usdt: Account<'info, TokenAccount>,\n    #[account(mut)] pub service_treasury_usdc: Account<'info, TokenAccount>,":
-              "#[account(mut)] pub usdt_vault: Box<Account<'info, TokenAccount>>,\n    #[account(mut)] pub usdc_vault: Box<Account<'info, TokenAccount>>,\n    #[account(mut)] pub service_treasury_usdt: Box<Account<'info, TokenAccount>>,\n    #[account(mut)] pub service_treasury_usdc: Box<Account<'info, TokenAccount>>,",
-              "#[account(mut, seeds = [b\"protocol\"], bump = protocol.bump)] pub protocol: Account<'info, ProtocolState>,\n    #[account(mut)] pub source_token: Account<'info, TokenAccount>,":
-              "#[account(mut, seeds = [b\"protocol\"], bump = protocol.bump)] pub protocol: Box<Account<'info, ProtocolState>>,\n    #[account(mut)] pub source_token: Box<Account<'info, TokenAccount>>,",
-              "#[account(mut)] pub vault_token: Account<'info, TokenAccount>,\n    #[account(mut)] pub service_treasury_token: Account<'info, TokenAccount>,\n    #[account(mut)] pub beneficiary: Account<'info, UserState>,":
-              "#[account(mut)] pub vault_token: Box<Account<'info, TokenAccount>>,\n    #[account(mut)] pub service_treasury_token: Box<Account<'info, TokenAccount>>,\n    #[account(mut)] pub beneficiary: Box<Account<'info, UserState>>,
-          }
-          for old, new in replacements.items():
+          type_replacements = [
+              ("Account<'info, ProtocolState>", "Box<Account<'info, ProtocolState>>"),
+              ("Account<'info, UserState>", "Box<Account<'info, UserState>>"),
+              ("Account<'info, TokenAccount>", "Box<Account<'info, TokenAccount>>"),
+              ("Account<'info, UnitBatch>", "Box<Account<'info, UnitBatch>>"),
+          ]
+          for old, new in type_replacements:
               if old not in s:
-                  raise SystemExit(f'expected stack-patch pattern missing: {old[:80]!r}')
-              s = s.replace(old, new, 1)
+                  raise SystemExit(f'expected account type missing: {old}')
+              s = s.replace(old, new)
           program.write_text(s)
 
           tests = Path('integration-tests/src/lib.rs')
