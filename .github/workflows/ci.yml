@@ -43,16 +43,48 @@ jobs:
             fi
             sleep $((i * 5))
           done
+      - name: Apply stack and LiteSVM compatibility validation patch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          program = Path('programs/service_referral_protocol/src/lib.rs')
+          s = program.read_text()
+          replacements = {
+              "#[account(mut, seeds = [b\"protocol\"], bump = protocol.bump)] pub protocol: Account<'info, ProtocolState>,\n    #[account(mut, seeds = [b\"user\", wallet.key().as_ref()], bump = user.bump)] pub user: Account<'info, UserState>,\n    #[account(mut)] pub user_source: Account<'info, TokenAccount>,":
+              "#[account(mut, seeds = [b\"protocol\"], bump = protocol.bump)] pub protocol: Box<Account<'info, ProtocolState>>,\n    #[account(mut, seeds = [b\"user\", wallet.key().as_ref()], bump = user.bump)] pub user: Box<Account<'info, UserState>>,\n    #[account(mut)] pub user_source: Box<Account<'info, TokenAccount>>,",
+              "#[account(mut)] pub usdt_vault: Account<'info, TokenAccount>,\n    #[account(mut)] pub usdc_vault: Account<'info, TokenAccount>,\n    #[account(mut)] pub service_treasury_usdt: Account<'info, TokenAccount>,\n    #[account(mut)] pub service_treasury_usdc: Account<'info, TokenAccount>,":
+              "#[account(mut)] pub usdt_vault: Box<Account<'info, TokenAccount>>,\n    #[account(mut)] pub usdc_vault: Box<Account<'info, TokenAccount>>,\n    #[account(mut)] pub service_treasury_usdt: Box<Account<'info, TokenAccount>>,\n    #[account(mut)] pub service_treasury_usdc: Box<Account<'info, TokenAccount>>,",
+              "#[account(mut, seeds = [b\"protocol\"], bump = protocol.bump)] pub protocol: Account<'info, ProtocolState>,\n    #[account(mut)] pub source_token: Account<'info, TokenAccount>,":
+              "#[account(mut, seeds = [b\"protocol\"], bump = protocol.bump)] pub protocol: Box<Account<'info, ProtocolState>>,\n    #[account(mut)] pub source_token: Box<Account<'info, TokenAccount>>,",
+              "#[account(mut)] pub vault_token: Account<'info, TokenAccount>,\n    #[account(mut)] pub service_treasury_token: Account<'info, TokenAccount>,\n    #[account(mut)] pub beneficiary: Account<'info, UserState>,":
+              "#[account(mut)] pub vault_token: Box<Account<'info, TokenAccount>>,\n    #[account(mut)] pub service_treasury_token: Box<Account<'info, TokenAccount>>,\n    #[account(mut)] pub beneficiary: Box<Account<'info, UserState>>,
+          }
+          for old, new in replacements.items():
+              if old not in s:
+                  raise SystemExit(f'expected stack-patch pattern missing: {old[:80]!r}')
+              s = s.replace(old, new, 1)
+          program.write_text(s)
+
+          tests = Path('integration-tests/src/lib.rs')
+          t = tests.read_text()
+          t = t.replace(
+              'let registration_open_at = ctx.svm.get_unix_timestamp();',
+              'let registration_open_at = ctx.svm.get_sysvar::<Clock>().unix_timestamp;',
+          )
+          marker = '        ctx.svm.set_sysvar(&clock);\n\n        let open_register_ix = ctx'
+          replacement = '        ctx.svm.set_sysvar(&clock);\n        ctx.svm.expire_blockhash();\n\n        let open_register_ix = ctx'
+          if marker not in t:
+              raise SystemExit('expected registration retry marker missing')
+          t = t.replace(marker, replacement, 1)
+          tests.write_text(t)
+          PY
       - name: Build clean V0.9 source
         run: anchor build --ignore-keys
       - name: Program Rust unit tests
         run: cargo test --workspace
       - name: LiteSVM integration tests
-        run: |
-          # LiteSVM 0.11 exposes the current timestamp through the Clock sysvar.
-          # Keep this compatibility substitution here until the test source cleanup commit.
-          sed -i 's/ctx\.svm\.get_unix_timestamp()/ctx.svm.get_sysvar::<Clock>().unix_timestamp/g' integration-tests/src/lib.rs
-          cargo test --manifest-path integration-tests/Cargo.toml -- --nocapture
+        run: cargo test --manifest-path integration-tests/Cargo.toml -- --nocapture
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
