@@ -18,6 +18,13 @@ pub mod service_referral_protocol {
 
     pub fn initialize(ctx: Context<Initialize>, registration_open_at: i64, qualified_revenue_source: Pubkey) -> Result<()> {
         require!(constants::percentages_valid(), ProtocolError::InvalidPercentages);
+        validate_initialization_environment(
+            ctx.accounts.service_treasury.key(),
+            ctx.accounts.usdt_mint.key(),
+            ctx.accounts.usdc_mint.key(),
+            qualified_revenue_source,
+            registration_open_at,
+        )?;
         let now = Clock::get()?.unix_timestamp;
         require!(registration_open_at >= now, ProtocolError::RegistrationOpenInPast);
         require!(qualified_revenue_source != Pubkey::default(), ProtocolError::InvalidRevenueSource);
@@ -681,6 +688,46 @@ fn transfer_from_vault<'info>(
     )
 }
 
+fn validate_initialization_environment(
+    service_treasury: Pubkey,
+    usdt_mint: Pubkey,
+    usdc_mint: Pubkey,
+    qualified_revenue_source: Pubkey,
+    registration_open_at: i64,
+) -> Result<()> {
+    #[cfg(feature = "production")]
+    {
+        require!(
+            MAINNET_QUALIFIED_REVENUE_SOURCE != Pubkey::default()
+                && MAINNET_REGISTRATION_OPEN_AT > 0,
+            ProtocolError::ProductionConfigNotFrozen
+        );
+        require_keys_eq!(service_treasury, MAINNET_SERVICE_TREASURY, ProtocolError::InvalidProductionConfig);
+        require_keys_eq!(usdt_mint, MAINNET_USDT_MINT, ProtocolError::InvalidProductionConfig);
+        require_keys_eq!(usdc_mint, MAINNET_USDC_MINT, ProtocolError::InvalidProductionConfig);
+        require_keys_eq!(
+            qualified_revenue_source,
+            MAINNET_QUALIFIED_REVENUE_SOURCE,
+            ProtocolError::InvalidProductionConfig
+        );
+        require!(
+            registration_open_at == MAINNET_REGISTRATION_OPEN_AT,
+            ProtocolError::InvalidProductionConfig
+        );
+    }
+    #[cfg(not(feature = "production"))]
+    {
+        let _ = (
+            service_treasury,
+            usdt_mint,
+            usdc_mint,
+            qualified_revenue_source,
+            registration_open_at,
+        );
+    }
+    Ok(())
+}
+
 #[error_code]
 pub enum ProtocolError {
     #[msg("Arithmetic overflow")] ArithmeticOverflow,
@@ -706,4 +753,6 @@ pub enum ProtocolError {
     #[msg("No expired pending reward to settle")] NothingToSettle,
     #[msg("User is not active")] NotActive,
     #[msg("Nothing to claim")] NothingToClaim,
+    #[msg("Production source/time configuration has not been frozen")] ProductionConfigNotFrozen,
+    #[msg("Production initialization does not match frozen mainnet configuration")] InvalidProductionConfig,
 }
