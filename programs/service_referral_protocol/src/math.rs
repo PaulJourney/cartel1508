@@ -29,6 +29,14 @@ pub fn split_amount(amount: u64) -> Result<(u64, [u64; 10], u64, u64, u64)> {
     Ok((direct, levels, pioneer, service, rounding_remainder))
 }
 
+pub fn allocate_unit_range(next_unit_id: u128, units: u64) -> Result<(u128, u128, u128)> {
+    if units == 0 { return err!(ProtocolError::ZeroUnits); }
+    let first = next_unit_id;
+    let next = first.checked_add(units as u128).ok_or(ProtocolError::ArithmeticOverflow)?;
+    let last = next.checked_sub(1).ok_or(ProtocolError::ArithmeticUnderflow)?;
+    Ok((first, last, next))
+}
+
 pub fn activity_status(user: &UserState, now: i64) -> ActivityStatus {
     if user.active_until > 0 && now <= user.active_until {
         ActivityStatus::Active
@@ -52,6 +60,17 @@ mod tests {
         assert_eq!(pioneer, 20_000);
         assert_eq!(service, 50_000);
         assert_eq!(remainder, 0);
+    }
+
+    #[test]
+    fn global_unit_ranges_are_contiguous_unique_and_support_huge_batches() {
+        let (first_a, last_a, next_a) = allocate_unit_range(1, 10).unwrap();
+        assert_eq!((first_a, last_a, next_a), (1, 10, 11));
+        let (first_b, last_b, next_b) = allocate_unit_range(next_a, 100_000_000_000).unwrap();
+        assert_eq!(first_b, 11);
+        assert_eq!(last_b, 100_000_000_010);
+        assert_eq!(next_b, 100_000_000_011);
+        assert!(last_a < first_b);
     }
 
     #[test]
