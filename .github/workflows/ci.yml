@@ -1,24 +1,9 @@
 name: protocol-ci
-on:
-  pull_request:
-  push:
-    branches: [main]
-
+on: [pull_request]
 permissions:
   contents: read
-
 jobs:
-  reference-and-static:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      - run: node tests/reference-model.mjs
-      - run: python3 scripts/static-gates.py
-
-  anchor-build:
+  checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,17 +12,22 @@ jobs:
           solana_version: '3.1.10'
           anchor_version: '1.1.2'
           node_version: '24'
-      - run: |
-          solana --version
-          anchor --version
-          rustc --version
       - run: cargo-build-sbf --install-only
+      - run: node tests/reference-model.mjs
       - run: python3 scripts/static-gates.py
       - run: cargo check --locked -p service_referral_protocol --features production
-      - run: anchor build --ignore-keys -- --locked
+      - name: Build with frozen dependency graph
+        run: |
+          sha256sum Cargo.lock > /tmp/root-lock.sha256
+          anchor build --ignore-keys
+          sha256sum -c /tmp/root-lock.sha256
       - run: cargo test --locked --workspace
       - run: cargo test --locked --manifest-path integration-tests/Cargo.toml --all-targets -- --nocapture
-      - run: anchor build --ignore-keys -- --locked --features production
+      - name: Build production artifact with frozen dependency graph
+        run: |
+          sha256sum Cargo.lock > /tmp/root-lock.sha256
+          anchor build --ignore-keys -- --features production
+          sha256sum -c /tmp/root-lock.sha256
       - run: sha256sum target/deploy/service_referral_protocol.so | tee target/deploy/service_referral_protocol.so.sha256
       - uses: actions/upload-artifact@v4
         with:
@@ -46,6 +36,3 @@ jobs:
             target/deploy/service_referral_protocol.so
             target/deploy/service_referral_protocol.so.sha256
             target/idl/*.json
-            Cargo.lock
-            integration-tests/Cargo.lock
-          if-no-files-found: error
