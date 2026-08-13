@@ -55,8 +55,18 @@ jobs:
         run: anchor build --ignore-keys
       - name: Program Rust unit tests
         run: cargo test --workspace
-      - name: LiteSVM integration tests
-        run: cargo test --manifest-path integration-tests/Cargo.toml -- --nocapture
+      - name: LiteSVM baseline tests
+        run: cargo test --manifest-path integration-tests/Cargo.toml --lib -- --nocapture
+      - name: LiteSVM initialization security tests
+        run: cargo test --manifest-path integration-tests/Cargo.toml --test initialization_security -- --nocapture
+      - name: LiteSVM economic accounting test
+        run: cargo test --manifest-path integration-tests/Cargo.toml --test economic -- --nocapture
+      - name: LiteSVM grace lifecycle test
+        run: cargo test --manifest-path integration-tests/Cargo.toml --test lifecycle -- --nocapture
+      - name: LiteSVM expiry test
+        run: cargo test --manifest-path integration-tests/Cargo.toml --test expiry -- --nocapture
+      - name: LiteSVM ten-level network test
+        run: cargo test --manifest-path integration-tests/Cargo.toml --test network -- --nocapture
       - name: Persist validated mint hardening
         if: github.event_name == 'pull_request'
         run: |
