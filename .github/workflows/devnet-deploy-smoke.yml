@@ -1,11 +1,6 @@
 name: devnet-deploy-smoke
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/devnet-deploy-smoke.yml'
-      - 'programs/**'
-      - 'Anchor.toml'
-      - 'Cargo.lock'
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
