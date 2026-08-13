@@ -5,7 +5,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   reference-and-static:
@@ -16,6 +16,7 @@ jobs:
         with:
           node-version: '24'
       - run: node tests/reference-model.mjs
+      - run: python3 scripts/static-gates.py
 
   anchor-build:
     runs-on: ubuntu-latest
@@ -44,46 +45,11 @@ jobs:
             fi
             sleep $((i * 5))
           done
-      - name: Apply one-time V0.10 global Unit ID migration
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          lib_path = Path('programs/service_referral_protocol/src/lib.rs')
-          source = lib_path.read_text()
-
-          init_old = '        p.real_user_count = 0;\n        p.pioneer_index_usdt = 0;\n'
-          init_new = '        p.real_user_count = 0;\n        p.next_unit_id = 1;\n        p.pioneer_index_usdt = 0;\n'
-          if init_new not in source:
-              if source.count(init_old) != 1:
-                  raise SystemExit('initialize Unit ID anchor mismatch')
-              source = source.replace(init_old, init_new, 1)
-
-          purchase_old = '        let user = &mut ctx.accounts.user;\n        let first = user.lifetime_service_units.checked_add(1).ok_or(ProtocolError::ArithmeticOverflow)?;\n        let last = user.lifetime_service_units.checked_add(units as u128).ok_or(ProtocolError::ArithmeticOverflow)?;\n        user.lifetime_service_units = last;\n        user.next_batch_index = user.next_batch_index.checked_add(1).ok_or(ProtocolError::ArithmeticOverflow)?;\n'
-          purchase_new = '        let (first_unit_id, last_unit_id, next_unit_id) =\n            allocate_unit_range(ctx.accounts.protocol.next_unit_id, units)?;\n        ctx.accounts.protocol.next_unit_id = next_unit_id;\n\n        let user = &mut ctx.accounts.user;\n        user.lifetime_service_units = user.lifetime_service_units\n            .checked_add(units as u128).ok_or(ProtocolError::ArithmeticOverflow)?;\n        user.next_batch_index = user.next_batch_index.checked_add(1).ok_or(ProtocolError::ArithmeticOverflow)?;\n'
-          if 'allocate_unit_range(ctx.accounts.protocol.next_unit_id, units)' not in source:
-              if source.count(purchase_old) != 1:
-                  raise SystemExit('purchase Unit ID anchor mismatch')
-              source = source.replace(purchase_old, purchase_new, 1)
-
-          source = source.replace('batch.first_local_unit_index = first;', 'batch.first_unit_id = first_unit_id;')
-          source = source.replace('batch.last_local_unit_index = last;', 'batch.last_unit_id = last_unit_id;')
-          if 'first_local_unit_index' in source or 'last_local_unit_index' in source:
-              raise SystemExit('legacy local Unit ID fields remain in program')
-          lib_path.write_text(source)
-
-          test_path = Path('integration-tests/src/lib.rs')
-          tests = test_path.read_text()
-          tests = tests.replace('batch.first_local_unit_index', 'batch.first_unit_id')
-          tests = tests.replace('batch.last_local_unit_index', 'batch.last_unit_id')
-          if 'first_local_unit_index' in tests or 'last_local_unit_index' in tests:
-              raise SystemExit('legacy local Unit ID fields remain in baseline test')
-          test_path.write_text(tests)
-          print('V0.10 global Unit ID migration applied')
-          PY
-      - name: Type-check migrated source
-        run: cargo check -p service_referral_protocol
-      - name: Build migrated source for runtime tests
+      - name: Static security gates
+        run: python3 scripts/static-gates.py
+      - name: Type-check production feature
+        run: cargo check -p service_referral_protocol --features production
+      - name: Build V0.10 source for runtime tests
         run: anchor build --ignore-keys
       - name: Program Rust unit tests
         run: cargo test --workspace
@@ -95,6 +61,8 @@ jobs:
         run: cargo test --manifest-path integration-tests/Cargo.toml --test authorization_security -- --nocapture
       - name: LiteSVM immutable-ancestry test
         run: cargo test --manifest-path integration-tests/Cargo.toml --test ancestry_security -- --nocapture
+      - name: LiteSVM global Unit ID test
+        run: cargo test --manifest-path integration-tests/Cargo.toml --test unit_ids -- --nocapture
       - name: LiteSVM economic accounting test
         run: cargo test --manifest-path integration-tests/Cargo.toml --test economic -- --nocapture
       - name: LiteSVM grace lifecycle test
@@ -103,15 +71,18 @@ jobs:
         run: cargo test --manifest-path integration-tests/Cargo.toml --test expiry -- --nocapture
       - name: LiteSVM ten-level network test
         run: cargo test --manifest-path integration-tests/Cargo.toml --test network -- --nocapture
-      - name: Persist validated V0.10 core migration
-        if: github.event_name == 'pull_request'
-        run: |
-          if git diff --quiet -- programs/service_referral_protocol/src/lib.rs integration-tests/src/lib.rs; then
-            echo "V0.10 migration already persisted"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add programs/service_referral_protocol/src/lib.rs integration-tests/src/lib.rs
-          git commit -m "allocate globally unique service Unit IDs"
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+      - name: Build production-gated V0.10 artifact
+        run: anchor build --ignore-keys -- --features production
+      - name: Hash production artifact
+        run: sha256sum target/deploy/service_referral_protocol.so | tee target/deploy/service_referral_protocol.so.sha256
+      - name: Upload production build and reproducibility inputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: anchor-build-v0.10-production-gated
+          path: |
+            target/deploy/service_referral_protocol.so
+            target/deploy/service_referral_protocol.so.sha256
+            target/idl/*.json
+            Cargo.lock
+            integration-tests/Cargo.lock
+          if-no-files-found: error
