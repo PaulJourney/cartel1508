@@ -49,7 +49,7 @@ jobs:
         run: python3 scripts/static-gates.py
       - name: Type-check production feature
         run: cargo check -p service_referral_protocol --features production
-      - name: Build committed V0.9 source
+      - name: Build committed V0.9 source for runtime tests
         run: anchor build --ignore-keys
       - name: Program Rust unit tests
         run: cargo test --workspace
@@ -69,11 +69,18 @@ jobs:
         run: cargo test --manifest-path integration-tests/Cargo.toml --test expiry -- --nocapture
       - name: LiteSVM ten-level network test
         run: cargo test --manifest-path integration-tests/Cargo.toml --test network -- --nocapture
-      - name: Upload build artifacts
+      - name: Build production-gated V0.9 artifact
+        run: anchor build --ignore-keys -- --features production
+      - name: Hash production artifact
+        run: sha256sum target/deploy/service_referral_protocol.so | tee target/deploy/service_referral_protocol.so.sha256
+      - name: Upload production build and reproducibility inputs
         uses: actions/upload-artifact@v4
         with:
-          name: anchor-build-v0.9
+          name: anchor-build-v0.9-production-gated
           path: |
-            target/deploy/*.so
+            target/deploy/service_referral_protocol.so
+            target/deploy/service_referral_protocol.so.sha256
             target/idl/*.json
+            Cargo.lock
+            integration-tests/Cargo.lock
           if-no-files-found: error
