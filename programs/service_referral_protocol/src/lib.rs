@@ -341,39 +341,39 @@ pub struct Initialize<'info> {
     /// CHECK: mint key stored in ProtocolState.
     pub usdc_mint: UncheckedAccount<'info>,
     #[account(init, payer = initializer, seeds = [b"protocol"], bump, space = ProtocolState::SPACE)]
-    pub protocol: Account<'info, ProtocolState>,
+    pub protocol: Box<Account<'info, ProtocolState>>,
     /// CHECK: PDA authority has no private key.
     #[account(seeds = [b"vault-authority"], bump)] pub vault_authority: UncheckedAccount<'info>,
     #[account(init, payer = initializer, seeds = [b"user", Pubkey::default().as_ref()], bump, space = UserState::SPACE)]
-    pub technical_root: Account<'info, UserState>,
+    pub technical_root: Box<Account<'info, UserState>>,
     pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
 pub struct Register<'info> {
     #[account(mut)] pub wallet: Signer<'info>,
-    #[account(mut, seeds = [b"protocol"], bump = protocol.bump)] pub protocol: Account<'info, ProtocolState>,
+    #[account(mut, seeds = [b"protocol"], bump = protocol.bump)] pub protocol: Box<Account<'info, ProtocolState>>,
     /// CHECK: wallet key verified against referrer state.
     pub referrer_wallet: UncheckedAccount<'info>,
-    #[account(seeds = [b"user", referrer_wallet.key().as_ref()], bump = referrer.bump)] pub referrer: Account<'info, UserState>,
-    #[account(init, payer = wallet, seeds = [b"user", wallet.key().as_ref()], bump, space = UserState::SPACE)] pub user: Account<'info, UserState>,
+    #[account(seeds = [b"user", referrer_wallet.key().as_ref()], bump = referrer.bump)] pub referrer: Box<Account<'info, UserState>>,
+    #[account(init, payer = wallet, seeds = [b"user", wallet.key().as_ref()], bump, space = UserState::SPACE)] pub user: Box<Account<'info, UserState>>,
     pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
 pub struct PurchaseServiceUnits<'info> {
     #[account(mut)] pub wallet: Signer<'info>,
-    #[account(mut, seeds = [b"protocol"], bump = protocol.bump)] pub protocol: Account<'info, ProtocolState>,
-    #[account(mut, seeds = [b"user", wallet.key().as_ref()], bump = user.bump)] pub user: Account<'info, UserState>,
-    #[account(mut)] pub user_source: Account<'info, TokenAccount>,
+    #[account(mut, seeds = [b"protocol"], bump = protocol.bump)] pub protocol: Box<Account<'info, ProtocolState>>,
+    #[account(mut, seeds = [b"user", wallet.key().as_ref()], bump = user.bump)] pub user: Box<Account<'info, UserState>>,
+    #[account(mut)] pub user_source: Box<Account<'info, TokenAccount>>,
     /// CHECK: PDA authority validated by seeds and canonical vault checks.
     #[account(seeds = [b"vault-authority"], bump = protocol.vault_authority_bump)] pub vault_authority: UncheckedAccount<'info>,
-    #[account(mut)] pub usdt_vault: Account<'info, TokenAccount>,
-    #[account(mut)] pub usdc_vault: Account<'info, TokenAccount>,
-    #[account(mut)] pub service_treasury_usdt: Account<'info, TokenAccount>,
-    #[account(mut)] pub service_treasury_usdc: Account<'info, TokenAccount>,
+    #[account(mut)] pub usdt_vault: Box<Account<'info, TokenAccount>>,
+    #[account(mut)] pub usdc_vault: Box<Account<'info, TokenAccount>>,
+    #[account(mut)] pub service_treasury_usdt: Box<Account<'info, TokenAccount>>,
+    #[account(mut)] pub service_treasury_usdc: Box<Account<'info, TokenAccount>>,
     #[account(init, payer = wallet, seeds = [b"batch", wallet.key().as_ref(), &user.next_batch_index.to_le_bytes()], bump, space = UnitBatch::SPACE)]
-    pub batch: Account<'info, UnitBatch>,
+    pub batch: Box<Account<'info, UnitBatch>>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
 }
@@ -381,25 +381,25 @@ pub struct PurchaseServiceUnits<'info> {
 #[derive(Accounts)]
 pub struct SettleExpired<'info> {
     #[account(mut)] pub settler: Signer<'info>,
-    #[account(mut, seeds = [b"protocol"], bump = protocol.bump)] pub protocol: Account<'info, ProtocolState>,
-    #[account(mut)] pub user: Account<'info, UserState>,
+    #[account(mut, seeds = [b"protocol"], bump = protocol.bump)] pub protocol: Box<Account<'info, ProtocolState>>,
+    #[account(mut)] pub user: Box<Account<'info, UserState>>,
     /// CHECK: PDA authority validated by seeds and canonical vault checks.
     #[account(seeds = [b"vault-authority"], bump = protocol.vault_authority_bump)] pub vault_authority: UncheckedAccount<'info>,
-    #[account(mut)] pub vault_token: Account<'info, TokenAccount>,
-    #[account(mut)] pub service_treasury_token: Account<'info, TokenAccount>,
+    #[account(mut)] pub vault_token: Box<Account<'info, TokenAccount>>,
+    #[account(mut)] pub service_treasury_token: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
 }
 
 #[derive(Accounts)]
 pub struct RecordQualifiedRevenue<'info> {
     pub revenue_source: Signer<'info>,
-    #[account(mut, seeds = [b"protocol"], bump = protocol.bump)] pub protocol: Account<'info, ProtocolState>,
-    #[account(mut)] pub source_token: Account<'info, TokenAccount>,
+    #[account(mut, seeds = [b"protocol"], bump = protocol.bump)] pub protocol: Box<Account<'info, ProtocolState>>,
+    #[account(mut)] pub source_token: Box<Account<'info, TokenAccount>>,
     /// CHECK: PDA authority validated by seeds.
     #[account(seeds = [b"vault-authority"], bump = protocol.vault_authority_bump)] pub vault_authority: UncheckedAccount<'info>,
-    #[account(mut)] pub vault_token: Account<'info, TokenAccount>,
-    #[account(mut)] pub service_treasury_token: Account<'info, TokenAccount>,
-    #[account(mut)] pub beneficiary: Account<'info, UserState>,
+    #[account(mut)] pub vault_token: Box<Account<'info, TokenAccount>>,
+    #[account(mut)] pub service_treasury_token: Box<Account<'info, TokenAccount>>,
+    #[account(mut)] pub beneficiary: Box<Account<'info, UserState>>,
     /// CHECK: verified dynamically against immutable ancestry.
     #[account(mut)] pub upline_1: UncheckedAccount<'info>,
     /// CHECK: verified dynamically against immutable ancestry.
@@ -426,12 +426,12 @@ pub struct RecordQualifiedRevenue<'info> {
 #[derive(Accounts)]
 pub struct Claim<'info> {
     #[account(mut)] pub wallet: Signer<'info>,
-    #[account(seeds = [b"protocol"], bump = protocol.bump)] pub protocol: Account<'info, ProtocolState>,
-    #[account(mut, seeds = [b"user", wallet.key().as_ref()], bump = user.bump)] pub user: Account<'info, UserState>,
+    #[account(seeds = [b"protocol"], bump = protocol.bump)] pub protocol: Box<Account<'info, ProtocolState>>,
+    #[account(mut, seeds = [b"user", wallet.key().as_ref()], bump = user.bump)] pub user: Box<Account<'info, UserState>>,
     /// CHECK: PDA authority validated by seeds.
     #[account(seeds = [b"vault-authority"], bump = protocol.vault_authority_bump)] pub vault_authority: UncheckedAccount<'info>,
-    #[account(mut)] pub vault_token: Account<'info, TokenAccount>,
-    #[account(mut)] pub destination: Account<'info, TokenAccount>,
+    #[account(mut)] pub vault_token: Box<Account<'info, TokenAccount>>,
+    #[account(mut)] pub destination: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
 }
 
@@ -549,10 +549,10 @@ fn settle_expired_all<'info>(
     now: i64,
     p: &mut ProtocolState,
     vault_authority: &UncheckedAccount<'info>,
-    usdt_vault: &Account<'info, TokenAccount>,
-    usdc_vault: &Account<'info, TokenAccount>,
-    treasury_usdt: &Account<'info, TokenAccount>,
-    treasury_usdc: &Account<'info, TokenAccount>,
+    usdt_vault: &Box<Account<'info, TokenAccount>>,
+    usdc_vault: &Box<Account<'info, TokenAccount>>,
+    treasury_usdt: &Box<Account<'info, TokenAccount>>,
+    treasury_usdc: &Box<Account<'info, TokenAccount>>,
     token_program: &Program<'info, Token>,
 ) -> Result<()> {
     if user.grace_until == 0 || now <= user.grace_until { return Ok(()); }
@@ -660,8 +660,8 @@ fn add_protocol_treasury_metrics(
 fn transfer_from_vault<'info>(
     p: &ProtocolState,
     vault_authority: &UncheckedAccount<'info>,
-    vault: &Account<'info, TokenAccount>,
-    destination: &Account<'info, TokenAccount>,
+    vault: &Box<Account<'info, TokenAccount>>,
+    destination: &Box<Account<'info, TokenAccount>>,
     _token_program: &Program<'info, Token>,
     amount: u64,
 ) -> Result<()> {

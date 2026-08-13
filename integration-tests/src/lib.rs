@@ -157,6 +157,7 @@ mod tests {
 
         clock.unix_timestamp = registration_open_at;
         ctx.svm.set_sysvar(&clock);
+        ctx.svm.expire_blockhash();
 
         let open_register_ix = ctx
             .program()
@@ -210,7 +211,7 @@ mod tests {
             &ID,
         );
 
-        let registration_open_at = ctx.svm.get_unix_timestamp();
+        let registration_open_at = ctx.svm.get_sysvar::<Clock>().unix_timestamp;
         let initialize_ix = ctx
             .program()
             .accounts(service_referral_protocol::accounts::Initialize {
