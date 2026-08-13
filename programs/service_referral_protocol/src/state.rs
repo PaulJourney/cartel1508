@@ -12,6 +12,8 @@ pub struct ProtocolState {
     pub usdc_mint: Pubkey,
     pub pioneer_count: u16,
     pub real_user_count: u64,
+    /// Next globally unique logical service-unit ID. Starts at 1.
+    pub next_unit_id: u128,
     /// Global per-virtual-share Pioneer index, scaled by PIONEER_SCALE.
     pub pioneer_index_usdt: u128,
     pub pioneer_index_usdc: u128,
@@ -32,7 +34,7 @@ pub struct ProtocolState {
 }
 
 impl ProtocolState {
-    pub const SPACE: usize = 388;
+    pub const SPACE: usize = 404;
 }
 
 #[account]
@@ -76,8 +78,8 @@ pub struct UnitBatch {
     pub batch_index: u64,
     pub mint: Pubkey,
     pub units: u64,
-    pub first_local_unit_index: u128,
-    pub last_local_unit_index: u128,
+    pub first_unit_id: u128,
+    pub last_unit_id: u128,
     pub purchased_at: i64,
 }
 
