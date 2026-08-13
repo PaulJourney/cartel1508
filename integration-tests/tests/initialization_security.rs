@@ -43,8 +43,10 @@ fn initialize_rejects_non_six_decimal_stablecoin_mint_atomically() {
         .instruction()
         .expect("initialize ix");
 
-    let result = ctx.execute_instruction(initialize_ix, &[&initializer]);
-    assert!(result.is_err(), "5-decimal stablecoin mint must be rejected");
+    let result = ctx
+        .execute_instruction(initialize_ix, &[&initializer])
+        .expect("execute invalid-decimals initialize transaction");
+    assert!(!result.is_success(), "5-decimal stablecoin mint must be rejected");
     assert!(ctx.svm.get_account(&protocol).is_none(), "failed initialize must not leave ProtocolState");
     assert!(ctx.svm.get_account(&technical_root).is_none(), "failed initialize must not leave technical root");
 }
@@ -79,8 +81,10 @@ fn initialize_rejects_same_mint_for_usdt_and_usdc_atomically() {
         .instruction()
         .expect("initialize ix");
 
-    let result = ctx.execute_instruction(initialize_ix, &[&initializer]);
-    assert!(result.is_err(), "USDT and USDC must not resolve to the same mint");
+    let result = ctx
+        .execute_instruction(initialize_ix, &[&initializer])
+        .expect("execute duplicate-mint initialize transaction");
+    assert!(!result.is_success(), "USDT and USDC must not resolve to the same mint");
     assert!(ctx.svm.get_account(&protocol).is_none(), "failed initialize must not leave ProtocolState");
     assert!(ctx.svm.get_account(&technical_root).is_none(), "failed initialize must not leave technical root");
 }
