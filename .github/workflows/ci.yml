@@ -59,6 +59,8 @@ jobs:
         run: cargo test --manifest-path integration-tests/Cargo.toml --test initialization_security -- --nocapture
       - name: LiteSVM revenue-source authorization test
         run: cargo test --manifest-path integration-tests/Cargo.toml --test authorization_security -- --nocapture
+      - name: LiteSVM immutable-ancestry test
+        run: cargo test --manifest-path integration-tests/Cargo.toml --test ancestry_security -- --nocapture
       - name: LiteSVM economic accounting test
         run: cargo test --manifest-path integration-tests/Cargo.toml --test economic -- --nocapture
       - name: LiteSVM grace lifecycle test
