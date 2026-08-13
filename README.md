@@ -1,4 +1,4 @@
-# Service Referral Protocol — Solana V0.8
+# Service Referral Protocol — Solana V0.10
 
 Public development repository for an ownerless Solana/Anchor protocol foundation.
 
@@ -6,7 +6,7 @@ Public development repository for an ownerless Solana/Anchor protocol foundation
 
 - Solana + Anchor/Rust.
 - USDT and USDC supported as separate accounting rails.
-- 1 USDT/USDC = 1 logical service unit; huge purchases use one batch PDA with a local unit-index range.
+- 1 USDT/USDC = 1 globally unique logical service unit; huge purchases use one batch PDA with a contiguous global Unit ID range.
 - Immutable referral relationship, maximum 10 economic levels.
 - Activity threshold: 10 units; ACTIVE 7 days; GRACE 48 hours.
 - Network rewards: ACTIVE -> claimable, GRACE -> pending, INACTIVE -> treasury allocation.
