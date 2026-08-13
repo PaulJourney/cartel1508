@@ -1,0 +1,67 @@
+name: devnet-deploy-smoke
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/devnet-deploy-smoke.yml'
+      - 'programs/**'
+      - 'Anchor.toml'
+      - 'Cargo.lock'
+permissions:
+  contents: read
+jobs:
+  deploy-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: solana-foundation/github-actions/setup-all@v0.2.15
+        with:
+          solana_version: '3.1.10'
+          anchor_version: '1.1.2'
+          node_version: '24'
+      - name: Configure ephemeral devnet identities
+        run: |
+          solana config set --url devnet
+          solana-keygen new --no-bip39-passphrase --silent --force -o ~/.config/solana/id.json
+          mkdir -p target/deploy
+          solana-keygen new --no-bip39-passphrase --silent --force -o target/deploy/service_referral_protocol-keypair.json
+          PROGRAM_ID="$(solana-keygen pubkey target/deploy/service_referral_protocol-keypair.json)"
+          echo "PROGRAM_ID=$PROGRAM_ID" >> "$GITHUB_ENV"
+          python3 - "$PROGRAM_ID" <<'PY'
+          from pathlib import Path
+          import sys
+          new_id = sys.argv[1]
+          old_id = '4AuoBkj4vkH2K1jwUuECtVBqF6Q74efjGbaw7btuNjRV'
+          for filename in ['programs/service_referral_protocol/src/lib.rs', 'Anchor.toml']:
+              p = Path(filename)
+              text = p.read_text()
+              if old_id not in text:
+                  raise SystemExit(f'expected development Program ID missing in {filename}')
+              p.write_text(text.replace(old_id, new_id))
+          PY
+          printf '%s\n' "$PROGRAM_ID" | tee /tmp/devnet-program-id.txt
+      - name: Fund ephemeral deployer with devnet SOL
+        run: |
+          for amount in 5 2 1; do
+            if solana airdrop "$amount" --url devnet; then break; fi
+            sleep 5
+          done
+          solana balance --url devnet
+      - name: Build temporary-ID program
+        run: |
+          cargo-build-sbf --install-only
+          anchor build --ignore-keys
+      - name: Deploy to devnet
+        run: |
+          solana program deploy target/deploy/service_referral_protocol.so \
+            --program-id target/deploy/service_referral_protocol-keypair.json \
+            --url devnet | tee /tmp/devnet-deploy.txt
+          solana program show "$PROGRAM_ID" --url devnet | tee /tmp/devnet-program-show.txt
+      - name: Publish only non-secret smoke evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: devnet-deploy-smoke-evidence
+          path: |
+            /tmp/devnet-program-id.txt
+            /tmp/devnet-deploy.txt
+            /tmp/devnet-program-show.txt
+          if-no-files-found: error
