@@ -1,25 +1,28 @@
-# Security model — V0.8
+# Security model — V0.10
 
-This is pre-audit software and must not receive production funds.
+This is pre-audit software and is not yet approved for production deployment.
 
-## Core invariants
+## Implemented and tested
 
-1. Unit purchases and referral reward creation are separate instructions and separate funding paths.
-2. `record_qualified_revenue` creates liabilities only after the stablecoin transfer to the protocol vault succeeds.
-3. Referral is write-once.
-4. The technical root receives no economic reward.
-5. The reward engine inspects exactly ten immutable ancestry accounts.
-6. Unsupported token mints are rejected.
-7. Claims are pull-based and require the beneficiary wallet signature.
-8. ACTIVE/GRACE/INACTIVE is derived from Solana Clock timestamps; there is no off-chain timer authority.
-9. Pioneer status is non-transferable and has no retroactive accrual before assignment.
-10. Final deployment must remove upgrade authority only after audit and verified build.
+- Service-unit purchase and qualified-revenue accounting are isolated funding paths.
+- Referral relationships are immutable and ancestry is validated at runtime.
+- Supported stablecoin mints are typed, distinct and require six decimals.
+- Protocol vault, treasury and claim token accounts are constrained to canonical ATAs.
+- Expired balances are permissionlessly settled and transferred to treasury.
+- Claims require the beneficiary signature and ACTIVE status.
+- Global service Unit IDs are monotonic `u128` ranges allocated in O(1) across all wallets.
+- No owner/admin mutation, pause, treasury mutation, referral mutation or revenue-source mutation instruction exists.
+- Static gates, Rust tests and LiteSVM integration tests pass.
+- Dependency lockfiles are committed and CI is read-only.
+- Anchor Docker `--verifiable` production build passes on Anchor 1.1.2.
 
-## Remaining hardening before audit
+## Remaining before irreversible mainnet
 
-- Replace ownership-only treasury token checks with exact canonical ATA checks.
-- Add physical sweep of previously pending expired balances during user/source touch so accounting and token balances move together.
-- Add full integration tests for PDA ancestry mutation/serialization.
-- Add exact vault ATA checks and canonical SPL Token Program validation.
-- Freeze production initializer, qualified revenue source, launch timestamp and Program ID in a production build profile.
-- Fuzz account-substitution and duplicate-account attacks.
+- Freeze final qualified-revenue source program/PDA.
+- Freeze registration opening UTC.
+- Establish final Program ID keypair custody outside the public repository.
+- Complete devnet deployment and transaction smoke tests.
+- Complete independent third-party security audit.
+- Re-run locked CI and verifiable build after final immutable parameters are frozen.
+- Perform limited mainnet smoke test while upgrade authority remains available.
+- Remove upgrade authority permanently only after final verification.
