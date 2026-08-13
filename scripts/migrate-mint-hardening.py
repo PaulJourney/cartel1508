@@ -2,6 +2,7 @@ from pathlib import Path
 
 lib_path = Path('programs/service_referral_protocol/src/lib.rs')
 gates_path = Path('scripts/static-gates.py')
+tests_path = Path('integration-tests/src/lib.rs')
 
 source = lib_path.read_text()
 
@@ -69,4 +70,25 @@ if "initialization uses typed SPL Mint accounts" not in gates:
     )
     gates_path.write_text(gates)
 
-print('SPL mint initialization hardening migration ready')
+# Two legacy LiteSVM initialization tests predated typed Mint accounts and used
+# random public keys as placeholder mints. Convert only those exact fixtures to
+# real six-decimal SPL mints; the purchase test already uses real mint accounts.
+tests = tests_path.read_text()
+legacy_pair = (
+    '        let usdt_mint = Pubkey::new_unique();\n'
+    '        let usdc_mint = Pubkey::new_unique();\n'
+)
+real_pair = (
+    '        let usdt_mint = ctx.svm.create_token_mint(&initializer, 6).expect("create USDT mint").pubkey();\n'
+    '        let usdc_mint = ctx.svm.create_token_mint(&initializer, 6).expect("create USDC mint").pubkey();\n'
+)
+legacy_count = tests.count(legacy_pair)
+if legacy_count:
+    if legacy_count != 2:
+        raise SystemExit(f'expected exactly 2 legacy mint fixture pairs, found {legacy_count}')
+    tests = tests.replace(legacy_pair, real_pair)
+elif tests.count(real_pair) < 2:
+    raise SystemExit('legacy mint fixtures were neither present nor already migrated')
+tests_path.write_text(tests)
+
+print('SPL mint initialization hardening + test fixture migration ready')
