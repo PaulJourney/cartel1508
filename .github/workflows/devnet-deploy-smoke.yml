@@ -1,11 +1,19 @@
 name: devnet-deploy-smoke
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - agent/solana-protocol-v0.8
+    paths:
+      - '.github/workflows/devnet-deploy-smoke.yml'
+      - 'scripts/devnet-transaction-smoke.mjs'
+      - 'package.json'
 permissions:
   contents: read
 jobs:
   deploy-smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: solana-foundation/github-actions/setup-all@v0.2.15
@@ -36,27 +44,49 @@ jobs:
           printf '%s\n' "$PROGRAM_ID" | tee /tmp/devnet-program-id.txt
       - name: Fund ephemeral deployer with devnet SOL
         run: |
+          funded=0
           for amount in 5 2 1; do
-            if solana airdrop "$amount" --url devnet; then break; fi
+            if solana airdrop "$amount" --url devnet; then
+              funded=1
+              break
+            fi
             sleep 5
           done
-          solana balance --url devnet
+          test "$funded" = "1"
+          solana balance --url devnet | tee /tmp/devnet-start-balance.txt
       - name: Build temporary-ID program
         run: |
           cargo-build-sbf --install-only
           anchor build --ignore-keys
+          test -s target/deploy/service_referral_protocol.so
+          test -s target/idl/service_referral_protocol.json
       - name: Deploy to devnet
         run: |
           solana program deploy target/deploy/service_referral_protocol.so \
             --program-id target/deploy/service_referral_protocol-keypair.json \
             --url devnet | tee /tmp/devnet-deploy.txt
           solana program show "$PROGRAM_ID" --url devnet | tee /tmp/devnet-program-show.txt
+      - name: Install pinned smoke-client dependencies
+        run: npm install --no-audit --no-fund --ignore-scripts
+      - name: Execute production-equivalent devnet transactions
+        env:
+          ANCHOR_PROVIDER_URL: https://api.devnet.solana.com
+          ANCHOR_WALLET: ~/.config/solana/id.json
+          PROTOCOL_IDL: target/idl/service_referral_protocol.json
+        run: |
+          npm run devnet:smoke | tee /tmp/devnet-transaction-smoke.txt
+          grep -q 'DEVNET TRANSACTION SMOKE: PASS' /tmp/devnet-transaction-smoke.txt
+      - name: Record final ephemeral deployer balance
+        run: solana balance --url devnet | tee /tmp/devnet-end-balance.txt
       - name: Publish only non-secret smoke evidence
         uses: actions/upload-artifact@v4
         with:
-          name: devnet-deploy-smoke-evidence
+          name: devnet-transaction-smoke-evidence
           path: |
             /tmp/devnet-program-id.txt
             /tmp/devnet-deploy.txt
             /tmp/devnet-program-show.txt
+            /tmp/devnet-start-balance.txt
+            /tmp/devnet-end-balance.txt
+            /tmp/devnet-transaction-smoke.txt
           if-no-files-found: error
