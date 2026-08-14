@@ -37,21 +37,24 @@ Status: pre-audit. This document defines the review target; it does not represen
 - Deterministic property tests cover 50,000 accounting amounts, including edge values through `u64::MAX`, and assert exact conservation of the gross amount after direct/network/Pioneer/service/rounding allocation.
 - Deterministic Unit ID property tests exercise 25,000 variable-size batches and assert contiguous, non-overlapping monotonic ranges.
 - LiteSVM integration suite passes for initialization, service-unit purchase, accounting, claim lifecycle, grace, expiry, ten-level routing, source authorization, ancestry substitution rejection and global Unit IDs across wallets.
-- Normal locked production build and Anchor Docker verifiable production build produce the same SHA-256:
-  `b257f3d588cec850b124a6b737e2d43032f0c292d8be06c4743722de76450194`
-- Rebuilding after documentation-only commits produces the same verifiable SHA-256.
-- Ephemeral Solana devnet deployment smoke test passed. Temporary devnet Program ID used for that proof: `6WZbsidaKgXcdvsJYuMS98BLsQzha67e6VyYLZFjSqEj`; its private key was not retained.
-- RustSec `cargo-audit` reports 0 known vulnerabilities in the production lockfile. One informational warning remains: `bincode 1.3.3` is marked unmaintained by `RUSTSEC-2025-0141` and is transitively required by the current Anchor/Solana dependency graph.
+- Normal locked production build and Anchor Docker verifiable production build have produced the same SHA-256 baseline:
+  `b257f3d588cec850b124a6b737e2d43032f0c292d8be06c4743722de76450194`.
+- A deployment-only ephemeral Solana devnet proof passed previously with a temporary Program ID whose private key was not retained.
+- A stronger production-equivalent devnet transaction smoke passed on 2026-08-14 using an ephemeral Program ID and mock six-decimal SPL stablecoins. The workflow executed deploy, initialize, Pioneer #1 registration, a 10-unit purchase, a separately funded 10-token qualified-revenue event, the 50/43/2/5 allocation path, and an ACTIVE user claim.
+- The full devnet smoke ended with exact conservation of the 20 minted test tokens: `5,002,000` atomic units at the user, `14,998,000` at the test treasury, and `0` in the vault after claim.
+- Devnet transaction evidence is retained by GitHub Actions for run `31785683081`, artifact `devnet-transaction-smoke-evidence` (artifact ID `9213483340`, archive digest `2517efadb5f6feaf85f03062e3909cffa688d72d21c97996c0de94763a8a3d9b`). The ephemeral Program ID was `BMrQVjrL9GYeJhFvURKuvYv8Ct63Dt5T4cuDcBvyA3pB`; no private deployment key is retained in the repository or evidence artifact.
+- Transient public-devnet RPC `429 Too Many Requests` responses occurred during the smoke run, were retried by the client, and did not alter the successful on-chain result.
+- RustSec `cargo-audit` has reported 0 known vulnerabilities in the production lockfile. One informational warning remains: `bincode 1.3.3` is marked unmaintained by `RUSTSEC-2025-0141` and is transitively required by the current Anchor/Solana dependency graph.
 
 ## Explicit mainnet blockers
 
 - Final qualified-revenue source program/PDA.
 - Final registration opening UTC.
 - Final Program ID keypair custody outside the public repository.
-- Production-equivalent devnet transaction smoke beyond deployment-only proof.
 - Independent third-party audit and disposition of findings.
 - Final locked/verifiable build after all immutable values are frozen.
 - Completed `release/mainnet-release.json` and a green `python3 scripts/pre-mainnet-gate.py` result.
+- Controlled mainnet deployment and deployed-bytecode verification.
 - Limited mainnet smoke test before permanent removal of upgrade authority.
 
 ## Out of scope for the current audit baseline
