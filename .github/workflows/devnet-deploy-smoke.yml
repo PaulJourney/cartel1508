@@ -1,13 +1,6 @@
 name: devnet-deploy-smoke
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - agent/solana-protocol-v0.8
-    paths:
-      - '.github/workflows/devnet-deploy-smoke.yml'
-      - 'scripts/devnet-transaction-smoke.mjs'
-      - 'package.json'
 permissions:
   contents: read
 jobs:
