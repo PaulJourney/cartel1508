@@ -79,4 +79,75 @@ mod tests {
         let payment = (units as u128) * (TOKEN_SCALE as u128);
         assert!(payment <= u64::MAX as u128);
     }
+
+    #[test]
+    fn split_conserves_every_sample_including_u64_boundaries() {
+        let fixed = [
+            1u64,
+            2,
+            3,
+            99,
+            100,
+            9_999,
+            10_000,
+            999_999,
+            1_000_000,
+            100_000_000_000_000,
+            u64::MAX / 2,
+            u64::MAX - 1,
+            u64::MAX,
+        ];
+
+        for amount in fixed {
+            assert_split_conservation(amount);
+        }
+
+        // Deterministic pseudo-random coverage: reproducible in CI, no fuzz dependency.
+        let mut x = 0x9E37_79B9_7F4A_7C15u64;
+        for _ in 0..50_000 {
+            x = x
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            assert_split_conservation(x.max(1));
+        }
+    }
+
+    #[test]
+    fn random_unit_ranges_remain_contiguous_and_non_overlapping() {
+        let mut next = 1u128;
+        let mut previous_last = 0u128;
+        let mut x = 0xD1B5_4A32_D192_ED03u64;
+
+        for _ in 0..25_000 {
+            x = x
+                .wrapping_mul(2_862_933_555_777_941_757)
+                .wrapping_add(3_037_000_493);
+            let units = (x % 1_000_000_000_000).max(1);
+            let (first, last, new_next) = allocate_unit_range(next, units).unwrap();
+
+            assert_eq!(first, next);
+            assert_eq!(last - first + 1, units as u128);
+            assert_eq!(new_next, last + 1);
+            assert!(first > previous_last);
+
+            previous_last = last;
+            next = new_next;
+        }
+    }
+
+    fn assert_split_conservation(amount: u64) {
+        let (direct, levels, pioneer, service, remainder) = split_amount(amount).unwrap();
+        let network = levels.iter().fold(0u128, |acc, v| acc + (*v as u128));
+        let total = (direct as u128)
+            + network
+            + (pioneer as u128)
+            + (service as u128)
+            + (remainder as u128);
+
+        assert_eq!(total, amount as u128);
+        assert!(direct <= amount);
+        assert!(pioneer <= amount);
+        assert!(service <= amount);
+        assert!(levels.iter().all(|v| *v <= amount));
+    }
 }
