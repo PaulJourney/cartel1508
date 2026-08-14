@@ -1,0 +1,13 @@
+{
+  "name": "service-referral-protocol-tools",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "devnet:smoke": "node scripts/devnet-transaction-smoke.mjs"
+  },
+  "dependencies": {
+    "@anchor-lang/core": "1.1.2",
+    "@solana/spl-token": "0.4.15",
+    "@solana/web3.js": "1.98.4"
+  }
+}
