@@ -15,6 +15,18 @@ jobs:
       - run: cargo-build-sbf --install-only
       - run: node tests/reference-model.mjs
       - run: python3 scripts/static-gates.py
+      - name: Prove pre-mainnet gate fails closed before final freeze
+        run: |
+          set +e
+          output="$(python3 scripts/pre-mainnet-gate.py 2>&1)"
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          test "$status" -ne 0
+          grep -q 'qualified revenue source is still the fail-closed sentinel' <<<"$output"
+          grep -q 'registration_open_at is not frozen' <<<"$output"
+          grep -q 'release/mainnet-release.json is missing' <<<"$output"
+          grep -q 'RESULT: BLOCKED' <<<"$output"
       - run: cargo check --locked -p service_referral_protocol --features production
       - name: Build with frozen dependency graph
         run: |
