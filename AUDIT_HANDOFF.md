@@ -69,12 +69,12 @@ Until that evidence model is approved, production sentinels remain fail-closed a
 
 ### Real Solana validator three-program smoke
 
-Latest hardened-source successful run:
+Latest adversarial successful run:
 
-- Actions run: `31900961240`
-- Evidence artifact: `qualification-localnet-smoke-evidence`
-- Artifact ID: `9251115987`
-- Artifact digest: `sha256:0f81d6d6af8322ef8b1ac277c20b1a93ffb16cdda64af32ddc7bf8e856c3d29f`
+- Actions run: `31901949687` — **SUCCESS**.
+- Evidence artifact: `qualification-localnet-smoke-evidence`.
+- Artifact ID: `9251370786`.
+- Artifact digest: `sha256:5d27d17094deba2f136637986da4c3fd4e88ad52c5aee4e7860524185b95d6a2`.
 
 It deploys all three programs to an isolated `solana-test-validator` with ephemeral Program IDs and proves:
 
@@ -84,23 +84,52 @@ It deploys all three programs to an isolated `solana-test-validator` with epheme
 - a separate payer-funded 100-USDC qualified event;
 - qualification -> adapter -> referral CPI path;
 - exact replay rejection with balances unchanged;
+- **referral-executable substitution rejection before token movement, with customer/treasury/vault/Revenue Authority balances unchanged and no receipt created**;
 - downstream ancestry failure with payer transfer + receipt creation rolled back;
 - ACTIVE claim;
 - exact conservation of all 310 test USDC.
 
+The successful workflow itself is the runtime assertion: any failed balance, receipt, replay, substitution or conservation invariant exits non-zero and fails the Actions job.
+
 ### Three-program compile / production graph
 
-- Hardened-source `revenue-adapter-ci`: run `31900961243` — SUCCESS.
+- Hardened-source `revenue-adapter-ci`: run `31900961243` — **SUCCESS**.
 - Covers locked graph, Rust tests, all three Anchor builds, production-feature graph and artifact hashing.
+
+### Full protocol CI / integration dependency lock
+
+- Final development-phase protocol CI: run `31901867138` — **SUCCESS**.
+- Artifact: `anchor-build-three-program-locked-production`.
+- Artifact ID: `9251365430`.
+- Artifact digest: `sha256:43b72fa42bc27222f019de4804593113c62077c9efe1e1e484d106c4074a4826`.
+
+This run passed:
+
+- reference-model tests;
+- extended static gates across all three programs;
+- explicit Solana PDA derivation self-test;
+- expected fail-closed pre-mainnet gate behavior;
+- locked production dependency graph;
+- all three Anchor builds;
+- Rust tests;
+- compilation of the complete LiteSVM integration target set with the synchronized lockfile;
+- the permitted LiteSVM runtime suite;
+- production build and three artifact hashes;
+- release-gate development mode;
+- artifact publication.
+
+`integration-tests/Cargo.lock` is maintained separately from the production root lock. The qualification dependency was synchronized using Solana `3.1.10` / Anchor `1.1.2`; sync run `31901550667` compiled all integration targets with `--locked` before committing the lockfile and removing its temporary workflow.
+
+The full qualification end-to-end runtime path is authoritative on real `solana-test-validator`; the known LiteSVM multi-program SPL-mint fixture anomaly is not used as the full-runtime release gate, although that target remains compiled as a diagnostic.
 
 ### Docker verifiable build
 
 Most recent completed development-evidence run after release-gate PDA derivation:
 
-- Actions run: `31901171318` — SUCCESS.
-- Artifact: `anchor-verifiable-three-program-production`
-- Artifact ID: `9251212906`
-- Artifact digest: `sha256:572dfa7139ffa300fa7f0a980926704570eb43d70a8bfc6369a3063dbeaa5824`
+- Actions run: `31901171318` — **SUCCESS**.
+- Artifact: `anchor-verifiable-three-program-production`.
+- Artifact ID: `9251212906`.
+- Artifact digest: `sha256:572dfa7139ffa300fa7f0a980926704570eb43d70a8bfc6369a3063dbeaa5824`.
 
 Development build hashes from that run:
 
@@ -112,7 +141,7 @@ These hashes are **not mainnet-final** because final Program IDs, evidence seman
 
 ### Dependency security
 
-- RustSec run: `31900619980` — SUCCESS.
+- RustSec run: `31900619980` — **SUCCESS**.
 - Evidence artifact ID: `9251007681`.
 - 0 known vulnerabilities in the scanned production dependency graph.
 - Informational warning only: transitively used `bincode 1.3.3` is marked unmaintained by RustSec; this should be considered in the toolchain/dependency review but is not reported as a known vulnerability by the scan.
@@ -126,13 +155,7 @@ The final gate independently derives:
 - Revenue Authority PDA from the final adapter Program ID;
 - Qualification Authority PDA from the final qualification Program ID.
 
-It requires exact agreement between derived PDAs, source constants and release-manifest values.
-
-### Integration test dependency lock
-
-`integration-tests/Cargo.lock` is maintained separately from the production root lock. The qualification dependency was synchronized using the pinned Solana 3.1.10 / Anchor 1.1.2 toolchain, and the synchronization workflow compiled all integration test targets with `--locked` before committing the lockfile.
-
-The full qualification end-to-end runtime path is authoritative on real `solana-test-validator`; the known LiteSVM multi-program SPL-mint fixture anomaly is not used as the full-runtime release gate, although the target remains compiled as a diagnostic.
+It requires exact agreement between derived PDAs, source constants and release-manifest values. Protocol CI requires the self-test to pass explicitly even while the development release remains intentionally `BLOCKED` for its mainnet sentinels.
 
 ## Evidence required from the final candidate
 
