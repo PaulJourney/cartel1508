@@ -15,7 +15,7 @@ jobs:
       - run: cargo-build-sbf --install-only
       - run: node tests/reference-model.mjs
       - run: python3 scripts/static-gates.py
-      - name: Prove pre-mainnet gate fails closed before final freeze
+      - name: Prove three-program pre-mainnet gate fails closed before final freeze
         run: |
           set +e
           output="$(python3 scripts/pre-mainnet-gate.py 2>&1)"
@@ -23,28 +23,44 @@ jobs:
           set -e
           printf '%s\n' "$output"
           test "$status" -ne 0
+          grep -q 'referral Program ID is still the development identity' <<<"$output"
+          grep -q 'adapter Program ID is still the development identity' <<<"$output"
+          grep -q 'qualification Program ID is still the development identity' <<<"$output"
+          grep -q 'adapter MAINNET_REFERRAL_PROGRAM is still fail-closed' <<<"$output"
+          grep -q 'adapter MAINNET_QUALIFICATION_PROGRAM is still fail-closed' <<<"$output"
+          grep -q 'qualification MAINNET_ADAPTER_PROGRAM is still fail-closed' <<<"$output"
           grep -q 'qualified revenue source is still the fail-closed sentinel' <<<"$output"
           grep -q 'registration_open_at is not frozen' <<<"$output"
           grep -q 'release/mainnet-release.json is missing' <<<"$output"
           grep -q 'RESULT: BLOCKED' <<<"$output"
-      - run: cargo check --locked -p service_referral_protocol --features production
-      - name: Build with frozen dependency graph
+      - run: cargo check --locked --workspace --features production
+      - name: Build all programs with frozen dependency graph
         run: |
           sha256sum Cargo.lock > /tmp/root-lock.sha256
           anchor build --ignore-keys
           sha256sum -c /tmp/root-lock.sha256
       - run: cargo test --locked --workspace
       - run: cargo test --locked --manifest-path integration-tests/Cargo.toml --all-targets -- --nocapture
-      - name: Build production artifact with frozen dependency graph
+      - name: Build production artifacts with frozen dependency graph
         run: |
           sha256sum Cargo.lock > /tmp/root-lock.sha256
           anchor build --ignore-keys -- --features production
           sha256sum -c /tmp/root-lock.sha256
-      - run: sha256sum target/deploy/service_referral_protocol.so | tee target/deploy/service_referral_protocol.so.sha256
+      - name: Hash all production artifacts
+        run: |
+          sha256sum target/deploy/service_referral_protocol.so | tee target/deploy/service_referral_protocol.so.sha256
+          sha256sum target/deploy/revenue_adapter.so | tee target/deploy/revenue_adapter.so.sha256
+          sha256sum target/deploy/revenue_qualification.so | tee target/deploy/revenue_qualification.so.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: anchor-build-v0.10-locked-production
+          name: anchor-build-three-program-locked-production
           path: |
             target/deploy/service_referral_protocol.so
             target/deploy/service_referral_protocol.so.sha256
+            target/deploy/revenue_adapter.so
+            target/deploy/revenue_adapter.so.sha256
+            target/deploy/revenue_qualification.so
+            target/deploy/revenue_qualification.so.sha256
             target/idl/*.json
+            Cargo.lock
+          if-no-files-found: error
