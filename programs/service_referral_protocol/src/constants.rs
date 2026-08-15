@@ -19,6 +19,9 @@ pub const MAINNET_USDT_MINT: Pubkey = pubkey!("Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11M
 pub const MAINNET_USDC_MINT: Pubkey = pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
 pub const MAINNET_SERVICE_TREASURY: Pubkey = pubkey!("AepYo8xanmKuRiLVeYQuCTJoQr1nyKiTApoKwHMEg8fn");
 // Fail-closed launch sentinels. Replace only during the final reviewed mainnet freeze.
+// MAINNET_REVENUE_ADAPTER_PROGRAM must be the exact immutable adapter Program ID.
+// MAINNET_QUALIFIED_REVENUE_SOURCE must be that adapter's [b"revenue-authority"] PDA.
+pub const MAINNET_REVENUE_ADAPTER_PROGRAM: Pubkey = pubkey!("11111111111111111111111111111111");
 pub const MAINNET_QUALIFIED_REVENUE_SOURCE: Pubkey = pubkey!("11111111111111111111111111111111");
 pub const MAINNET_REGISTRATION_OPEN_AT: i64 = 0;
 
