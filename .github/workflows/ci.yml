@@ -15,6 +15,7 @@ jobs:
       - run: cargo-build-sbf --install-only
       - run: node tests/reference-model.mjs
       - run: python3 scripts/static-gates.py
+      - run: python3 scripts/revenue-adapter-static-gates.py
       - name: Prove pre-mainnet gate fails closed before final freeze
         run: |
           set +e
@@ -23,6 +24,7 @@ jobs:
           set -e
           printf '%s\n' "$output"
           test "$status" -ne 0
+          grep -q 'Program ID is still the development identity' <<<"$output"
           grep -q 'qualified revenue source is still the fail-closed sentinel' <<<"$output"
           grep -q 'registration_open_at is not frozen' <<<"$output"
           grep -q 'release/mainnet-release.json is missing' <<<"$output"
@@ -41,6 +43,21 @@ jobs:
           anchor build --ignore-keys -- --features production
           sha256sum -c /tmp/root-lock.sha256
       - run: sha256sum target/deploy/service_referral_protocol.so | tee target/deploy/service_referral_protocol.so.sha256
+      - name: Resolve isolated Revenue Adapter dependency graph
+        working-directory: programs/revenue_adapter
+        run: |
+          cargo generate-lockfile
+          sha256sum Cargo.lock | tee Cargo.lock.sha256
+      - name: Check and test Revenue Adapter with generated lock
+        working-directory: programs/revenue_adapter
+        run: |
+          cargo check --locked
+          cargo test --locked
+      - name: Build Revenue Adapter SBF production candidate
+        working-directory: programs/revenue_adapter
+        run: |
+          cargo build-sbf --locked --features production
+          sha256sum target/deploy/revenue_adapter.so | tee target/deploy/revenue_adapter.so.sha256
       - uses: actions/upload-artifact@v4
         with:
           name: anchor-build-v0.10-locked-production
@@ -48,3 +65,7 @@ jobs:
             target/deploy/service_referral_protocol.so
             target/deploy/service_referral_protocol.so.sha256
             target/idl/*.json
+            programs/revenue_adapter/Cargo.lock
+            programs/revenue_adapter/Cargo.lock.sha256
+            programs/revenue_adapter/target/deploy/revenue_adapter.so
+            programs/revenue_adapter/target/deploy/revenue_adapter.so.sha256
