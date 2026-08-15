@@ -47,6 +47,34 @@ DEVELOPMENT_IDS = {
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 ACTIONS_RUN_RE = re.compile(r"^https://github\.com/[^/]+/[^/]+/actions/runs/[0-9]+(?:/.*)?$")
 BASE58_RE = r"[1-9A-HJ-NP-Za-km-z]+"
+BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+BASE58_VALUES = {ch: i for i, ch in enumerate(BASE58_ALPHABET)}
+PDA_MARKER = b"ProgramDerivedAddress"
+REVENUE_AUTHORITY_SEED = b"revenue-authority"
+QUALIFICATION_AUTHORITY_SEED = b"qualified-revenue-authority"
+
+# ed25519 field constants used by Solana's PDA off-curve check.
+ED25519_P = 2**255 - 19
+ED25519_D = (-121665 * pow(121666, ED25519_P - 2, ED25519_P)) % ED25519_P
+ED25519_SQRT_M1 = pow(2, (ED25519_P - 1) // 4, ED25519_P)
+
+# Independent real-validator smoke vectors. These were produced by Solana/Web3
+# in Actions run 31899960367 and make the stdlib-only PDA implementation
+# self-checking before it is trusted for a release decision.
+PDA_SELF_TEST_VECTORS = [
+    (
+        "615KDn9i6ga8e1bTcfCWGhS59Es6NUoc3aV3tZBZGTde",
+        REVENUE_AUTHORITY_SEED,
+        "D4uhJW8YxGWB9tGR7Ez3VVFC3mMvTp94UEz4am8jJi5r",
+        253,
+    ),
+    (
+        "6KpbpbtwwRkxa2MRwgYP2xMDbDBvX8UfozHinvk14cbH",
+        QUALIFICATION_AUTHORITY_SEED,
+        "5x7NTmp3eEcFMMQst2vH1t8Us2Riu9U45AdQKCYRB5rD",
+        254,
+    ),
+]
 
 
 def extract(pattern: str, text: str, label: str) -> str:
@@ -82,6 +110,91 @@ def extract_frozen_binding(name: str, text: str, label: str) -> str | None:
     if zero:
         return None
     raise RuntimeError(f"cannot parse {label}")
+
+
+def base58_decode(value: str) -> bytes:
+    number = 0
+    try:
+        for ch in value:
+            number = number * 58 + BASE58_VALUES[ch]
+    except KeyError as exc:
+        raise ValueError(f"invalid base58 character: {exc.args[0]}") from exc
+    raw = number.to_bytes((number.bit_length() + 7) // 8, "big") if number else b""
+    leading_zeroes = len(value) - len(value.lstrip("1"))
+    decoded = (b"\x00" * leading_zeroes) + raw
+    if len(decoded) != 32:
+        raise ValueError(f"Solana public key must decode to 32 bytes, got {len(decoded)}")
+    return decoded
+
+
+def base58_encode(value: bytes) -> str:
+    leading_zeroes = 0
+    for byte in value:
+        if byte != 0:
+            break
+        leading_zeroes += 1
+    number = int.from_bytes(value, "big")
+    encoded = []
+    while number:
+        number, remainder = divmod(number, 58)
+        encoded.append(BASE58_ALPHABET[remainder])
+    suffix = "".join(reversed(encoded))
+    return ("1" * leading_zeroes) + suffix
+
+
+def is_ed25519_curve_point(compressed: bytes) -> bool:
+    """Mirror Solana's PDA rule: candidate hashes must not decompress as ed25519 points."""
+    if len(compressed) != 32:
+        return False
+
+    y_bytes = bytearray(compressed)
+    y_bytes[31] &= 0x7F  # high bit encodes x sign, not y magnitude
+    y = int.from_bytes(y_bytes, "little")
+    if y >= ED25519_P:
+        return False
+
+    y_squared = (y * y) % ED25519_P
+    denominator = (ED25519_D * y_squared + 1) % ED25519_P
+    if denominator == 0:
+        return False
+    x_squared = ((y_squared - 1) * pow(denominator, ED25519_P - 2, ED25519_P)) % ED25519_P
+
+    # p == 5 (mod 8): recover a square root when one exists.
+    x = pow(x_squared, (ED25519_P + 3) // 8, ED25519_P)
+    if (x * x) % ED25519_P != x_squared:
+        x = (x * ED25519_SQRT_M1) % ED25519_P
+    return (x * x) % ED25519_P == x_squared
+
+
+def create_program_address(seeds: list[bytes], program_id: bytes) -> bytes | None:
+    if len(seeds) > 16:
+        raise ValueError("Solana PDA supports at most 16 seeds")
+    if any(len(seed) > 32 for seed in seeds):
+        raise ValueError("Solana PDA seed exceeds 32 bytes")
+    candidate = hashlib.sha256(b"".join(seeds) + program_id + PDA_MARKER).digest()
+    if is_ed25519_curve_point(candidate):
+        return None
+    return candidate
+
+
+def find_program_address(seed: bytes, program_id_b58: str) -> tuple[str, int]:
+    program_id = base58_decode(program_id_b58)
+    for bump in range(255, -1, -1):
+        candidate = create_program_address([seed, bytes([bump])], program_id)
+        if candidate is not None:
+            return base58_encode(candidate), bump
+    raise RuntimeError("unable to derive Solana PDA")
+
+
+def assert_pda_self_test() -> None:
+    for program_id, seed, expected_address, expected_bump in PDA_SELF_TEST_VECTORS:
+        actual_address, actual_bump = find_program_address(seed, program_id)
+        if actual_address != expected_address or actual_bump != expected_bump:
+            raise RuntimeError(
+                "PDA derivation self-test failed: "
+                f"expected {expected_address}/{expected_bump}, "
+                f"got {actual_address}/{actual_bump}"
+            )
 
 
 def sha256_file(path: Path) -> str:
@@ -141,6 +254,12 @@ def main() -> int:
     blockers: list[str] = []
     notes: list[str] = []
 
+    try:
+        assert_pda_self_test()
+        notes.append("Solana PDA derivation self-test passed against real-validator vectors")
+    except Exception as exc:
+        blockers.append(f"PDA derivation self-test failed: {exc}")
+
     core_constants = CORE_CONSTANTS.read_text()
     core_lib = CORE_LIB.read_text()
     adapter_lib = ADAPTER_LIB.read_text()
@@ -152,6 +271,26 @@ def main() -> int:
     qualification_program_id = extract_declare_id(
         qualification_lib, "qualification declare_id"
     )
+
+    derived_revenue_authority: str | None = None
+    derived_qualification_authority: str | None = None
+    try:
+        derived_revenue_authority, revenue_authority_bump = find_program_address(
+            REVENUE_AUTHORITY_SEED, adapter_program_id
+        )
+        derived_qualification_authority, qualification_authority_bump = find_program_address(
+            QUALIFICATION_AUTHORITY_SEED, qualification_program_id
+        )
+        notes.append(
+            f"derived Revenue Authority PDA: {derived_revenue_authority} "
+            f"(bump {revenue_authority_bump})"
+        )
+        notes.append(
+            f"derived Qualification Authority PDA: {derived_qualification_authority} "
+            f"(bump {qualification_authority_bump})"
+        )
+    except Exception as exc:
+        blockers.append(f"cannot derive final authority PDAs: {exc}")
 
     treasury = extract_pubkey_macro(
         "MAINNET_SERVICE_TREASURY", core_constants, "mainnet treasury"
@@ -259,6 +398,11 @@ def main() -> int:
             blockers.append(
                 "qualified revenue source must be the adapter Revenue Authority PDA, not a treasury or Program ID"
             )
+    if derived_revenue_authority and revenue_source != derived_revenue_authority:
+        blockers.append(
+            "core MAINNET_QUALIFIED_REVENUE_SOURCE does not equal the Revenue Authority PDA "
+            "derived from the final adapter Program ID"
+        )
 
     if registration_open <= 0:
         blockers.append("registration_open_at is not frozen to a positive UTC unix timestamp")
@@ -317,6 +461,7 @@ def main() -> int:
             "revenue_adapter_program_id",
             "revenue_qualification_program_id",
             "qualified_revenue_source",
+            "qualification_authority",
             "registration_open_at",
             "service_treasury",
             "usdt_mint",
@@ -336,12 +481,22 @@ def main() -> int:
             "revenue_adapter_program_id": adapter_program_id,
             "revenue_qualification_program_id": qualification_program_id,
             "qualified_revenue_source": revenue_source,
+            "qualification_authority": derived_qualification_authority,
             "registration_open_at": registration_open,
             **EXPECTED,
         }
         for key, expected in expected_manifest.items():
             if manifest.get(key) != expected:
-                blockers.append(f"release manifest {key} does not match frozen source")
+                blockers.append(f"release manifest {key} does not match frozen/derived source")
+
+        if derived_revenue_authority and manifest.get("qualified_revenue_source") != derived_revenue_authority:
+            blockers.append(
+                "release manifest qualified_revenue_source does not equal the adapter-derived Revenue Authority PDA"
+            )
+        if derived_qualification_authority and manifest.get("qualification_authority") != derived_qualification_authority:
+            blockers.append(
+                "release manifest qualification_authority does not equal the qualification-program-derived PDA"
+            )
 
         manifest_commit = manifest.get("commit_sha")
         if git_head and manifest_commit != git_head:
@@ -398,14 +553,16 @@ def main() -> int:
         _ = (artifact_hashes, audit_hash)
 
     print("=== PRE-MAINNET THREE-PROGRAM GATE ===")
-    print(f"Referral ID:      {referral_program_id}")
-    print(f"Adapter ID:       {adapter_program_id}")
-    print(f"Qualification ID: {qualification_program_id}")
-    print(f"Treasury:         {treasury}")
-    print(f"USDT mint:        {usdt}")
-    print(f"USDC mint:        {usdc}")
-    print(f"Revenue source:   {revenue_source}")
-    print(f"Open UTC:         {registration_open}")
+    print(f"Referral ID:          {referral_program_id}")
+    print(f"Adapter ID:           {adapter_program_id}")
+    print(f"Qualification ID:     {qualification_program_id}")
+    print(f"Treasury:             {treasury}")
+    print(f"USDT mint:            {usdt}")
+    print(f"USDC mint:            {usdc}")
+    print(f"Revenue source:       {revenue_source}")
+    print(f"Derived revenue PDA:  {derived_revenue_authority or '<derivation failed>'}")
+    print(f"Derived qualifier PDA:{derived_qualification_authority or '<derivation failed>'}")
+    print(f"Open UTC:             {registration_open}")
     for note in notes:
         print(f"NOTE  {note}")
 
