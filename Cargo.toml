@@ -1,3 +1,4 @@
+# Standard-CI revalidation marker after the evidence-bound qualification E2E consolidation.
 [workspace]
 members = [
   "programs/service_referral_protocol",
