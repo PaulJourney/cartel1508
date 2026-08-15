@@ -10,6 +10,7 @@ This runbook is intentionally conservative. Permanent immutability is the final 
 - Keep all Program ID keypairs and temporary upgrade-authority/deployer key material in secure, separate custody.
 - Freeze adapter -> referral, adapter -> qualification and qualification -> adapter production bindings.
 - Derive the final adapter `RevenueAuthority` PDA and freeze that exact public key as the referral protocol's qualified-revenue source.
+- Derive the final qualification `qualified-revenue-authority` PDA from the final qualification Program ID; no private key exists for this authority.
 - Freeze the exact registration opening UTC.
 - Add all three exact Program IDs under `[programs.mainnet]` in `Anchor.toml`.
 - Hash the approved `QUALIFIED_REVENUE_SOURCE_SPEC.md` and record that hash in the final release evidence.
@@ -41,7 +42,8 @@ Create `release/mainnet-release.json` from `release/mainnet-release.example.json
 
 - final commit;
 - three Program IDs;
-- final adapter Revenue Authority PDA;
+- final adapter Revenue Authority PDA / core qualified-revenue source;
+- final Qualification Authority PDA;
 - registration UTC;
 - treasury and canonical mints;
 - all three verified `.so` SHA-256 values;
@@ -57,6 +59,8 @@ Then run:
 ```text
 python3 scripts/pre-mainnet-gate.py
 ```
+
+The gate independently derives both authority PDAs from the frozen final Program IDs, self-tests its PDA implementation against real Solana validator vectors and requires exact agreement with core/source/manifest values.
 
 The result must be exactly `READY FOR CONTROLLED MAINNET DEPLOYMENT`. A `BLOCKED` result is a hard stop. Do not bypass or weaken the gate for deployment convenience.
 
