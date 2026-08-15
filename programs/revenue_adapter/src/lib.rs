@@ -10,6 +10,12 @@ pub const REVENUE_AUTHORITY_SEED: &[u8] = b"revenue-authority";
 pub const CONFIG_SEED: &[u8] = b"adapter-config";
 pub const RECEIPT_SEED: &[u8] = b"revenue-receipt";
 
+// Production launch values are deliberately fail-closed until the final reviewed freeze.
+pub const MAINNET_REFERRAL_PROGRAM: Pubkey = Pubkey::new_from_array([0u8; 32]);
+pub const MAINNET_QUALIFICATION_PROGRAM: Pubkey = Pubkey::new_from_array([0u8; 32]);
+pub const MAINNET_USDT_MINT: Pubkey = pubkey!("Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB");
+pub const MAINNET_USDC_MINT: Pubkey = pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+
 #[program]
 pub mod revenue_adapter {
     use super::*;
@@ -25,6 +31,7 @@ pub mod revenue_adapter {
         require!(qualification_program != Pubkey::default(), AdapterError::InvalidProgram);
         require!(referral_program != qualification_program, AdapterError::InvalidProgram);
         require!(usdt_mint != usdc_mint, AdapterError::DuplicateMint);
+        validate_production_environment(referral_program, qualification_program, usdt_mint, usdc_mint)?;
 
         let expected_qualifier = Pubkey::find_program_address(
             &[QUALIFIER_AUTHORITY_SEED],
@@ -252,6 +259,31 @@ impl RevenueReceipt {
     pub const SPACE: usize = 8 + 1 + 32 + 32 + 32 + 8 + 8 + 8 + 32;
 }
 
+fn validate_production_environment(
+    referral_program: Pubkey,
+    qualification_program: Pubkey,
+    usdt_mint: Pubkey,
+    usdc_mint: Pubkey,
+) -> Result<()> {
+    #[cfg(feature = "production")]
+    {
+        require!(
+            MAINNET_REFERRAL_PROGRAM != Pubkey::default()
+                && MAINNET_QUALIFICATION_PROGRAM != Pubkey::default(),
+            AdapterError::ProductionConfigNotFrozen
+        );
+        require_keys_eq!(referral_program, MAINNET_REFERRAL_PROGRAM, AdapterError::InvalidProductionConfig);
+        require_keys_eq!(qualification_program, MAINNET_QUALIFICATION_PROGRAM, AdapterError::InvalidProductionConfig);
+        require_keys_eq!(usdt_mint, MAINNET_USDT_MINT, AdapterError::InvalidProductionConfig);
+        require_keys_eq!(usdc_mint, MAINNET_USDC_MINT, AdapterError::InvalidProductionConfig);
+    }
+    #[cfg(not(feature = "production"))]
+    {
+        let _ = (referral_program, qualification_program, usdt_mint, usdc_mint);
+    }
+    Ok(())
+}
+
 #[error_code]
 pub enum AdapterError {
     #[msg("Invalid program identity")] InvalidProgram,
@@ -264,4 +296,6 @@ pub enum AdapterError {
     #[msg("Revenue source token account is not owned by the adapter revenue authority PDA")] WrongRevenueAuthority,
     #[msg("Revenue source token account is not the canonical ATA")] NonCanonicalSource,
     #[msg("Revenue authority ATA is not sufficiently funded before accounting")] InsufficientFunding,
+    #[msg("Production referral/qualification identities have not been frozen")] ProductionConfigNotFrozen,
+    #[msg("Production initialization does not match frozen adapter configuration")] InvalidProductionConfig,
 }
