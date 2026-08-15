@@ -372,6 +372,46 @@ invariant((await tokenAmount(connection, customerUsdc.address)) === replayCustom
 invariant((await tokenAmount(connection, treasuryUsdc.address)) === replayTreasuryBefore, "replay must not change treasury");
 invariant((await tokenAmount(connection, vaultUsdc.address)) === replayVaultBefore, "replay must not change vault");
 
+// Referral executable substitution: the new qualification preflight must reject a
+// different executable before value enters the adapter path. The account below is a
+// real executable (the qualification program itself), so this specifically exercises
+// the immutable referral binding rather than merely failing an executable check.
+const nonce3 = Buffer.alloc(32, 3);
+const event3 = eventId(qualificationId, customer.publicKey, user, usdcMint, revenueAmount, nonce3);
+const [receipt3] = PublicKey.findProgramAddressSync([RECEIPT_SEED, event3], adapterId);
+const substitutedReferral = await qualification.methods
+  .qualifyPaymentAndRoute([...nonce3], new BN(revenueAmount.toString()))
+  .accounts({
+    payer: customer.publicKey,
+    payerSourceToken: customerUsdc.address,
+    qualificationAuthority,
+    adapterConfig,
+    revenueAuthority,
+    revenueSourceToken: revenueUsdc.address,
+    adapterReceipt: receipt3,
+    adapterProgram: adapterId,
+    referralProgram: qualificationId,
+    protocol,
+    vaultAuthority,
+    vaultToken: vaultUsdc.address,
+    serviceTreasuryToken: treasuryUsdc.address,
+    beneficiary: user,
+    ...rootAccounts,
+    tokenProgram: TOKEN_PROGRAM_ID,
+    systemProgram: SystemProgram.programId,
+  })
+  .instruction();
+const substitutionCustomerBefore = await tokenAmount(connection, customerUsdc.address);
+const substitutionTreasuryBefore = await tokenAmount(connection, treasuryUsdc.address);
+const substitutionVaultBefore = await tokenAmount(connection, vaultUsdc.address);
+const substitutionRevenueBefore = await tokenAmount(connection, revenueUsdc.address);
+await expectFailure(connection, customer, substitutedReferral, [], "referral executable substitution");
+invariant((await tokenAmount(connection, customerUsdc.address)) === substitutionCustomerBefore, "referral substitution must not charge customer");
+invariant((await tokenAmount(connection, treasuryUsdc.address)) === substitutionTreasuryBefore, "referral substitution must not alter treasury");
+invariant((await tokenAmount(connection, vaultUsdc.address)) === substitutionVaultBefore, "referral substitution must not alter vault");
+invariant((await tokenAmount(connection, revenueUsdc.address)) === substitutionRevenueBefore, "referral substitution must not alter Revenue Authority ATA");
+invariant((await connection.getAccountInfo(receipt3, "confirmed")) === null, "referral substitution must not create a receipt");
+
 // Fresh receipt + deliberately wrong ancestry. Adapter creates the receipt before referral CPI;
 // downstream failure must therefore roll back both the customer's token transfer and receipt creation.
 const nonce2 = Buffer.alloc(32, 2);
@@ -450,6 +490,7 @@ console.log(
       qualificationAuthority: qualificationAuthority.toBase58(),
       receipt1: receipt1.toBase58(),
       receipt2RolledBack: receipt2.toBase58(),
+      receipt3ReferralSubstitutionRejected: receipt3.toBase58(),
       usdcMint: usdcMint.toBase58(),
       finalUserAtomic: finalUser.toString(),
       finalCustomerAtomic: finalCustomer.toString(),
