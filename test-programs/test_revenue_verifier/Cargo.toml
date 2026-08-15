@@ -21,7 +21,7 @@ production = []
 
 [dependencies]
 anchor-lang = "=1.1.2"
-revenue_adapter = { path = "../revenue_adapter", features = ["cpi"] }
+revenue_adapter = { path = "../../programs/revenue_adapter", features = ["cpi"] }
 
 [workspace]
 resolver = "2"

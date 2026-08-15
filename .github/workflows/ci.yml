@@ -124,7 +124,7 @@ jobs:
           cp "$core_dev" adapter-integration-tests/artifacts/service_referral_protocol.dev.so
           cp "$adapter_dev" adapter-integration-tests/artifacts/revenue_adapter.dev.so
       - name: Prove test verifier cannot become production code
-        working-directory: programs/test_revenue_verifier
+        working-directory: test-programs/test_revenue_verifier
         run: |
           cargo generate-lockfile
           cargo check --locked
@@ -137,10 +137,10 @@ jobs:
           test "$status" -ne 0
           grep -q 'TEST-ONLY fixture' <<<"$output"
       - name: Build test verifier SBF
-        working-directory: programs/test_revenue_verifier
+        working-directory: test-programs/test_revenue_verifier
         run: cargo build-sbf -- --locked
       - name: Stage verifier artifact
-        run: cp programs/test_revenue_verifier/target/deploy/test_revenue_verifier.so adapter-integration-tests/artifacts/test_revenue_verifier.so
+        run: cp test-programs/test_revenue_verifier/target/deploy/test_revenue_verifier.so adapter-integration-tests/artifacts/test_revenue_verifier.so
       - name: Run verifier-adapter-core adversarial tests
         working-directory: adapter-integration-tests
         run: |

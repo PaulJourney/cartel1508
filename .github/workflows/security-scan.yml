@@ -15,14 +15,24 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install pinned cargo-audit
         run: cargo install cargo-audit --version 0.22.2 --locked
-      - name: Scan production Cargo.lock against RustSec
+      - name: Scan core production Cargo.lock against RustSec
         run: |
           set -o pipefail
-          cargo audit --json | tee cargo-audit.json
+          cargo audit --json | tee cargo-audit-core.json
+      - name: Resolve and scan Revenue Adapter dependency graph against RustSec
+        working-directory: programs/revenue_adapter
+        run: |
+          set -o pipefail
+          cargo generate-lockfile
+          sha256sum Cargo.lock | tee Cargo.lock.sha256
+          cargo audit --json | tee ../../cargo-audit-revenue-adapter.json
       - name: Retain audit evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: rustsec-cargo-audit
-          path: cargo-audit.json
+          path: |
+            cargo-audit-core.json
+            cargo-audit-revenue-adapter.json
+            programs/revenue_adapter/Cargo.lock.sha256
           if-no-files-found: warn
