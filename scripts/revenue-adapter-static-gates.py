@@ -2,6 +2,8 @@ from pathlib import Path
 
 source = Path('programs/revenue_adapter/src/lib.rs').read_text()
 cargo = Path('programs/revenue_adapter/Cargo.toml').read_text()
+core_constants = Path('programs/service_referral_protocol/src/constants.rs').read_text()
+binding_test = Path('programs/revenue_adapter/tests/release_binding.rs').read_text()
 
 checks = {
     'adapter has no admin mutation surface': all(x not in source for x in [
@@ -27,6 +29,15 @@ checks = {
     'adapter CPI targets referral record qualified revenue': 'service_referral_protocol::cpi::record_qualified_revenue' in source,
     'adapter cannot select arbitrary referral program': 'Program<\'info, service_referral_protocol::program::ServiceReferralProtocol>' in source,
     'isolated staging workspace is explicit': '[workspace]' in cargo,
+    'core exposes fail-closed adapter Program ID binding': 'MAINNET_REVENUE_ADAPTER_PROGRAM' in core_constants,
+    'release binding test derives exact RevenueAuthority PDA': all(x in binding_test for x in [
+        'MAINNET_REVENUE_ADAPTER_PROGRAM',
+        'MAINNET_QUALIFIED_REVENUE_SOURCE',
+        'Pubkey::find_program_address',
+        'revenue_adapter::REVENUE_AUTHORITY_SEED',
+        'revenue_adapter::ID',
+    ]),
+    'release binding is all-or-nothing': 'any_frozen' in binding_test and binding_test.count('assert_ne!') >= 6,
 }
 
 for name, ok in checks.items():
