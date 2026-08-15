@@ -35,6 +35,32 @@ pub mod revenue_qualification {
         );
         validate_production_environment(ctx.accounts.adapter_program.key(), mint)?;
 
+        // Do not merely trust an account discriminator + owner. Re-derive the one
+        // canonical adapter config PDA so a substitute adapter-owned config can never
+        // alter the frozen trust chain, even if the adapter evolves before finalization.
+        let expected_adapter_config = Pubkey::find_program_address(
+            &[revenue_adapter::CONFIG_SEED],
+            &ctx.accounts.adapter_program.key(),
+        )
+        .0;
+        require_keys_eq!(
+            ctx.accounts.adapter_config.key(),
+            expected_adapter_config,
+            QualificationError::InvalidAdapterConfig
+        );
+        require!(
+            ctx.accounts.adapter_program.executable,
+            QualificationError::InvalidAdapterProgram
+        );
+        require_keys_eq!(
+            ctx.accounts.adapter_config.referral_program,
+            ctx.accounts.referral_program.key(),
+            QualificationError::InvalidReferralProgram
+        );
+        require!(
+            ctx.accounts.referral_program.executable,
+            QualificationError::InvalidReferralProgram
+        );
         require_keys_eq!(
             ctx.accounts.adapter_config.qualification_program,
             crate::ID,
@@ -197,10 +223,10 @@ pub struct QualifyPaymentAndRoute<'info> {
     #[account(mut)]
     pub adapter_receipt: UncheckedAccount<'info>,
 
-    /// CHECK: fixed by address and adapter configuration.
+    /// CHECK: fixed by address and validated executable before any token transfer.
     #[account(address = revenue_adapter::ID)]
     pub adapter_program: UncheckedAccount<'info>,
-    /// CHECK: adapter/referral programs validate the exact executable identity.
+    /// CHECK: bound to adapter_config and validated executable before any token transfer.
     pub referral_program: UncheckedAccount<'info>,
     /// CHECK: validated by referral protocol.
     #[account(mut)]
@@ -282,6 +308,12 @@ pub enum QualificationError {
     InvalidNonce,
     #[msg("Unsupported stablecoin mint")]
     UnsupportedMint,
+    #[msg("Adapter config is not the canonical adapter-config PDA")]
+    InvalidAdapterConfig,
+    #[msg("Adapter program is not executable")]
+    InvalidAdapterProgram,
+    #[msg("Referral program does not match immutable adapter configuration or is not executable")]
+    InvalidReferralProgram,
     #[msg("Adapter is not bound to this qualification program")]
     AdapterNotBoundToQualificationProgram,
     #[msg("Qualification authority mismatch")]
