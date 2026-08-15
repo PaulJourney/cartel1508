@@ -1,5 +1,24 @@
 name: verifiable-build
-on: [pull_request]
+on:
+  push:
+    branches: [agent/revenue-adapter-v0.1]
+    paths:
+      - 'programs/service_referral_protocol/**'
+      - 'programs/revenue_adapter/**'
+      - 'programs/revenue_qualification/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Anchor.toml'
+      - '.github/workflows/verifiable.yml'
+  pull_request:
+    paths:
+      - 'programs/service_referral_protocol/**'
+      - 'programs/revenue_adapter/**'
+      - 'programs/revenue_qualification/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Anchor.toml'
+      - '.github/workflows/verifiable.yml'
 permissions:
   contents: read
 jobs:
