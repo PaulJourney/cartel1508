@@ -1,4 +1,5 @@
 name: revenue-qualification-e2e-lock-sync
+# Fresh run after the deterministic positive LiteSVM clock fixture was committed.
 on:
   push:
     branches: [agent/revenue-qualification-e2e]
