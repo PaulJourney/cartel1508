@@ -22,6 +22,13 @@ jobs:
         run: |
           cargo generate-lockfile --manifest-path integration-tests/Cargo.toml
           anchor build --ignore-keys
+      - name: Inspect SPL dependency graph
+        run: |
+          cargo tree --manifest-path integration-tests/Cargo.toml -i spl-token || true
+          cargo tree --manifest-path integration-tests/Cargo.toml -i solana-program || true
+          cargo tree --manifest-path integration-tests/Cargo.toml -i anchor-spl || true
+      - name: Re-run proven economic fixture under current graph
+        run: cargo test --locked --manifest-path integration-tests/Cargo.toml --test economic -- --nocapture
       - name: Run atomic qualification end-to-end test
         run: cargo test --locked --manifest-path integration-tests/Cargo.toml --test qualification_e2e -- --nocapture
       - name: Commit integration lock and remove temporary workflow
