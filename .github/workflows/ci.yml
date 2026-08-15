@@ -24,6 +24,11 @@ jobs:
           printf '%s\n' "$output"
           test "$status" -ne 0
           grep -q 'Program ID is still the development identity' <<<"$output"
+          grep -q 'Revenue Adapter Program ID is still the development identity' <<<"$output"
+          grep -q 'revenue adapter Program ID is still the fail-closed sentinel' <<<"$output"
+          grep -q 'revenue verifier Program ID is still the fail-closed sentinel' <<<"$output"
+          grep -q 'production revenue verifier source is missing' <<<"$output"
+          grep -q 'qualified-revenue product qualification specification is not FINAL' <<<"$output"
           grep -q 'qualified revenue source is still the fail-closed sentinel' <<<"$output"
           grep -q 'registration_open_at is not frozen' <<<"$output"
           grep -q 'release/mainnet-release.json is missing' <<<"$output"
