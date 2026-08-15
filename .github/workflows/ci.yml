@@ -3,7 +3,7 @@ on: [pull_request]
 permissions:
   contents: read
 jobs:
-  checks:
+  core:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,7 +15,6 @@ jobs:
       - run: cargo-build-sbf --install-only
       - run: node tests/reference-model.mjs
       - run: python3 scripts/static-gates.py
-      - run: python3 scripts/revenue-adapter-static-gates.py
       - name: Prove pre-mainnet gate fails closed before final freeze
         run: |
           set +e
@@ -43,6 +42,25 @@ jobs:
           anchor build --ignore-keys -- --features production
           sha256sum -c /tmp/root-lock.sha256
       - run: sha256sum target/deploy/service_referral_protocol.so | tee target/deploy/service_referral_protocol.so.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anchor-build-v0.10-locked-production
+          path: |
+            target/deploy/service_referral_protocol.so
+            target/deploy/service_referral_protocol.so.sha256
+            target/idl/*.json
+
+  revenue-adapter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: solana-foundation/github-actions/setup-all@v0.2.15
+        with:
+          solana_version: '3.1.10'
+          anchor_version: '1.1.2'
+          node_version: '24'
+      - run: cargo-build-sbf --install-only
+      - run: python3 scripts/revenue-adapter-static-gates.py
       - name: Resolve isolated Revenue Adapter dependency graph
         working-directory: programs/revenue_adapter
         run: |
@@ -60,12 +78,10 @@ jobs:
           sha256sum target/deploy/revenue_adapter.so | tee target/deploy/revenue_adapter.so.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: anchor-build-v0.10-locked-production
+          name: revenue-adapter-v0.1-production-candidate
           path: |
-            target/deploy/service_referral_protocol.so
-            target/deploy/service_referral_protocol.so.sha256
-            target/idl/*.json
             programs/revenue_adapter/Cargo.lock
             programs/revenue_adapter/Cargo.lock.sha256
             programs/revenue_adapter/target/deploy/revenue_adapter.so
             programs/revenue_adapter/target/deploy/revenue_adapter.so.sha256
+          if-no-files-found: error
