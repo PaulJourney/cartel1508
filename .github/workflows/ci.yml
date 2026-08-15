@@ -16,6 +16,8 @@ jobs:
       - run: node tests/reference-model.mjs
       - run: python3 scripts/static-gates.py
       - name: Prove pre-mainnet gate fails closed before final freeze
+        env:
+          RELEASE_SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set +e
           output="$(python3 scripts/pre-mainnet-gate.py 2>&1)"
