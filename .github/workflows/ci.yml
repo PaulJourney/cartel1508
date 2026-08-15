@@ -31,8 +31,12 @@ jobs:
       - run: cargo-build-sbf --install-only
       - run: node tests/reference-model.mjs
       - run: python3 scripts/static-gates.py
-      - name: Prove three-program pre-mainnet gate fails closed before final freeze
+      - name: Prove pre-mainnet gate fails closed while final manifest is absent
         run: |
+          if [ -f release/mainnet-release.json ]; then
+            echo 'Final release manifest exists; READY gate is deferred until production artifacts are built.'
+            exit 0
+          fi
           set +e
           output="$(python3 scripts/pre-mainnet-gate.py 2>&1)"
           status=$?
@@ -67,6 +71,13 @@ jobs:
           sha256sum target/deploy/service_referral_protocol.so | tee target/deploy/service_referral_protocol.so.sha256
           sha256sum target/deploy/revenue_adapter.so | tee target/deploy/revenue_adapter.so.sha256
           sha256sum target/deploy/revenue_qualification.so | tee target/deploy/revenue_qualification.so.sha256
+      - name: Require READY only when final release manifest is present
+        run: |
+          if [ -f release/mainnet-release.json ]; then
+            python3 scripts/pre-mainnet-gate.py
+          else
+            echo 'No final manifest: development release remains intentionally fail-closed.'
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: anchor-build-three-program-locked-production
