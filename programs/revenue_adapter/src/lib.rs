@@ -144,7 +144,7 @@ pub mod revenue_adapter {
         };
 
         let cpi_ctx = CpiContext::new_with_signer(
-            ctx.accounts.referral_program.to_account_info(),
+            ctx.accounts.referral_program.key(),
             cpi_accounts,
             signer_seeds,
         );
