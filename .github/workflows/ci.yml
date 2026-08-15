@@ -1,0 +1,155 @@
+name: protocol-ci
+on: [pull_request]
+permissions:
+  contents: read
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: solana-foundation/github-actions/setup-all@v0.2.15
+        with:
+          solana_version: '3.1.10'
+          anchor_version: '1.1.2'
+          node_version: '24'
+      - run: cargo-build-sbf --install-only
+      - run: node tests/reference-model.mjs
+      - run: python3 scripts/static-gates.py
+      - name: Prove pre-mainnet gate fails closed before final freeze
+        env:
+          RELEASE_SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set +e
+          output="$(python3 scripts/pre-mainnet-gate.py 2>&1)"
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          test "$status" -ne 0
+          grep -q 'Program ID is still the development identity' <<<"$output"
+          grep -q 'Revenue Adapter Program ID is still the development identity' <<<"$output"
+          grep -q 'revenue adapter Program ID is still the fail-closed sentinel' <<<"$output"
+          grep -q 'revenue verifier Program ID is still the fail-closed sentinel' <<<"$output"
+          grep -q 'production revenue verifier source is missing' <<<"$output"
+          grep -q 'qualified-revenue product qualification specification is not FINAL' <<<"$output"
+          grep -q 'qualified revenue source is still the fail-closed sentinel' <<<"$output"
+          grep -q 'registration_open_at is not frozen' <<<"$output"
+          grep -q 'release/mainnet-release.json is missing' <<<"$output"
+          grep -q 'RESULT: BLOCKED' <<<"$output"
+      - run: cargo check --locked -p service_referral_protocol --features production
+      - name: Build development artifact with frozen dependency graph
+        run: |
+          sha256sum Cargo.lock > /tmp/root-lock.sha256
+          anchor build --ignore-keys
+          cp target/deploy/service_referral_protocol.so target/deploy/service_referral_protocol.dev.so
+          sha256sum -c /tmp/root-lock.sha256
+      - run: cargo test --locked --workspace
+      - run: cargo test --locked --manifest-path integration-tests/Cargo.toml --all-targets -- --nocapture
+      - name: Build production artifact with frozen dependency graph
+        run: |
+          sha256sum Cargo.lock > /tmp/root-lock.sha256
+          anchor build --ignore-keys -- --features production
+          sha256sum -c /tmp/root-lock.sha256
+      - run: sha256sum target/deploy/service_referral_protocol.so | tee target/deploy/service_referral_protocol.so.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anchor-build-v0.10-locked-production
+          path: |
+            target/deploy/service_referral_protocol.dev.so
+            target/deploy/service_referral_protocol.so
+            target/deploy/service_referral_protocol.so.sha256
+            target/idl/*.json
+          if-no-files-found: error
+
+  revenue-adapter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: solana-foundation/github-actions/setup-all@v0.2.15
+        with:
+          solana_version: '3.1.10'
+          anchor_version: '1.1.2'
+          node_version: '24'
+      - run: cargo-build-sbf --install-only
+      - run: python3 scripts/revenue-adapter-static-gates.py
+      - name: Resolve isolated Revenue Adapter dependency graph
+        working-directory: programs/revenue_adapter
+        run: |
+          cargo generate-lockfile
+          sha256sum Cargo.lock | tee Cargo.lock.sha256
+      - name: Check and test Revenue Adapter with generated lock
+        working-directory: programs/revenue_adapter
+        run: |
+          cargo check --locked
+          cargo test --locked
+      - name: Build Revenue Adapter development SBF
+        working-directory: programs/revenue_adapter
+        run: |
+          cargo build-sbf -- --locked
+          cp target/deploy/revenue_adapter.so target/deploy/revenue_adapter.dev.so
+      - name: Build Revenue Adapter SBF production candidate
+        working-directory: programs/revenue_adapter
+        run: |
+          cargo build-sbf -- --locked --features production
+          sha256sum target/deploy/revenue_adapter.so | tee target/deploy/revenue_adapter.so.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: revenue-adapter-v0.1-production-candidate
+          path: |
+            programs/revenue_adapter/Cargo.lock
+            programs/revenue_adapter/Cargo.lock.sha256
+            programs/revenue_adapter/target/deploy/revenue_adapter.dev.so
+            programs/revenue_adapter/target/deploy/revenue_adapter.so
+            programs/revenue_adapter/target/deploy/revenue_adapter.so.sha256
+          if-no-files-found: error
+
+  adapter-cross-program-security:
+    needs: [core, revenue-adapter]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: solana-foundation/github-actions/setup-all@v0.2.15
+        with:
+          solana_version: '3.1.10'
+          anchor_version: '1.1.2'
+          node_version: '24'
+      - run: cargo-build-sbf --install-only
+      - uses: actions/download-artifact@v4
+        with:
+          name: anchor-build-v0.10-locked-production
+          path: /tmp/core-artifact
+      - uses: actions/download-artifact@v4
+        with:
+          name: revenue-adapter-v0.1-production-candidate
+          path: /tmp/adapter-artifact
+      - name: Stage development artifacts for cross-program tests
+        run: |
+          mkdir -p adapter-integration-tests/artifacts
+          core_dev="$(find /tmp/core-artifact -name service_referral_protocol.dev.so -print -quit)"
+          adapter_dev="$(find /tmp/adapter-artifact -name revenue_adapter.dev.so -print -quit)"
+          test -n "$core_dev"
+          test -n "$adapter_dev"
+          cp "$core_dev" adapter-integration-tests/artifacts/service_referral_protocol.dev.so
+          cp "$adapter_dev" adapter-integration-tests/artifacts/revenue_adapter.dev.so
+      - name: Prove test verifier cannot become production code
+        working-directory: test-programs/test_revenue_verifier
+        run: |
+          cargo generate-lockfile
+          cargo check --locked
+          cargo test --locked
+          set +e
+          output="$(cargo check --locked --features production 2>&1)"
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          test "$status" -ne 0
+          grep -q 'TEST-ONLY fixture' <<<"$output"
+      - name: Build test verifier SBF
+        working-directory: test-programs/test_revenue_verifier
+        run: cargo build-sbf -- --locked
+      - name: Stage verifier artifact
+        run: cp test-programs/test_revenue_verifier/target/deploy/test_revenue_verifier.so adapter-integration-tests/artifacts/test_revenue_verifier.so
+      - name: Run verifier-adapter-core adversarial tests
+        working-directory: adapter-integration-tests
+        run: |
+          cargo generate-lockfile
+          cargo test --locked -- --nocapture

@@ -1,0 +1,15 @@
+[package]
+name = "protocol-integration-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+anchor-lang = "=1.1.2"
+anchor-litesvm = "=0.4.0"
+litesvm-utils = "=0.4.0"
+service_referral_protocol = { path = "../programs/service_referral_protocol", features = ["no-entrypoint"] }
+solana-signer = "=3.0.1"
+solana-transaction = { version = "=3.0.1", features = ["bincode"] }
+spl-token = "=9.0.0"
+spl-associated-token-account = "=8.0.0"

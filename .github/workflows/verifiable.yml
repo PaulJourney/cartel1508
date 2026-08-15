@@ -1,0 +1,28 @@
+name: verifiable-build
+on: [pull_request]
+permissions:
+  contents: read
+jobs:
+  docker-verifiable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: solana-foundation/github-actions/setup-all@v0.2.15
+        with:
+          solana_version: '3.1.10'
+          anchor_version: '1.1.2'
+          node_version: '24'
+      - name: Verifiable production build
+        working-directory: programs/service_referral_protocol
+        run: anchor build --verifiable --ignore-keys -- --features production
+      - name: Hash verifiable artifact
+        run: sha256sum target/verifiable/service_referral_protocol.so | tee target/verifiable/service_referral_protocol.so.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anchor-verifiable-v0.10-production
+          path: |
+            target/verifiable/service_referral_protocol.so
+            target/verifiable/service_referral_protocol.so.sha256
+            target/idl/*.json
+            Cargo.lock
+          if-no-files-found: error

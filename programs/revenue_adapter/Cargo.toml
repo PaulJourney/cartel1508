@@ -1,0 +1,28 @@
+[package]
+name = "revenue_adapter"
+version = "0.1.0"
+description = "Fail-closed qualified revenue adapter for the Service Referral Protocol"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "revenue_adapter"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build", "service_referral_protocol/idl-build"]
+production = ["service_referral_protocol/production"]
+
+[dependencies]
+anchor-lang = "=1.1.2"
+anchor-spl = { version = "=1.1.2", features = ["token", "associated_token"] }
+service_referral_protocol = { path = "../service_referral_protocol", features = ["cpi"] }
+
+# Staged as an isolated workspace until its generated lockfile and SBF artifact
+# have passed CI. It will be folded into the root workspace at final freeze.
+[workspace]
+resolver = "2"

@@ -1,0 +1,16 @@
+[features]
+resolution = true
+skip-lint = false
+
+[programs.localnet]
+service_referral_protocol = "4AuoBkj4vkH2K1jwUuECtVBqF6Q74efjGbaw7btuNjRV"
+
+[programs.devnet]
+service_referral_protocol = "4AuoBkj4vkH2K1jwUuECtVBqF6Q74efjGbaw7btuNjRV"
+
+[provider]
+cluster = "localnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "node tests/reference-model.mjs"
