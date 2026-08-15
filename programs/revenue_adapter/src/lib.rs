@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::associated_token::get_associated_token_address_with_program_id;
 use anchor_spl::token::{self, Token, TokenAccount};
-use service_referral_protocol::cpi;
+use service_referral_protocol::cpi as referral_cpi;
 
 declare_id!("EmGJDPvwSx6kU4KijWGh8uqRNj3BJXNjcWQyCmfKv7WL");
 
@@ -109,7 +109,7 @@ pub mod revenue_adapter {
         let signer_bump = [config.revenue_authority_bump];
         let signer_seeds: &[&[u8]] = &[REVENUE_AUTHORITY_SEED, &signer_bump];
 
-        let cpi_accounts = cpi::accounts::RecordQualifiedRevenue {
+        let cpi_accounts = referral_cpi::accounts::RecordQualifiedRevenue {
             revenue_source: ctx.accounts.revenue_authority.to_account_info(),
             protocol: ctx.accounts.protocol.to_account_info(),
             source_token: ctx.accounts.source_token.to_account_info(),
@@ -130,7 +130,7 @@ pub mod revenue_adapter {
             token_program: ctx.accounts.token_program.to_account_info(),
         };
 
-        cpi::record_qualified_revenue(
+        referral_cpi::record_qualified_revenue(
             CpiContext::new_with_signer(
                 ctx.accounts.referral_program.key(),
                 cpi_accounts,
