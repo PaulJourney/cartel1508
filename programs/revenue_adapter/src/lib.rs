@@ -59,10 +59,12 @@ pub mod revenue_adapter {
     pub fn submit_revenue_event(
         ctx: Context<SubmitRevenueEvent>,
         event_id: [u8; 32],
+        evidence_hash: [u8; 32],
         amount: u64,
     ) -> Result<()> {
         require!(amount > 0, AdapterError::ZeroAmount);
         require!(event_id != [0u8; 32], AdapterError::InvalidEventId);
+        require!(evidence_hash != [0u8; 32], AdapterError::InvalidEvidenceHash);
 
         let config = &ctx.accounts.config;
         require_keys_eq!(
@@ -96,14 +98,16 @@ pub mod revenue_adapter {
         );
         require!(ctx.accounts.source_token.amount >= amount, AdapterError::InsufficientFunding);
 
+        let clock = Clock::get()?;
         let receipt = &mut ctx.accounts.receipt;
         receipt.bump = ctx.bumps.receipt;
         receipt.event_id = event_id;
+        receipt.evidence_hash = evidence_hash;
         receipt.beneficiary = ctx.accounts.beneficiary.key();
         receipt.mint = mint;
         receipt.amount = amount;
-        receipt.accepted_at = Clock::get()?.unix_timestamp;
-        receipt.accepted_slot = Clock::get()?.slot;
+        receipt.accepted_at = clock.unix_timestamp;
+        receipt.accepted_slot = clock.slot;
         receipt.qualifier = ctx.accounts.qualification_authority.key();
 
         let signer_bump = [config.revenue_authority_bump];
@@ -247,6 +251,7 @@ impl AdapterConfig {
 pub struct RevenueReceipt {
     pub bump: u8,
     pub event_id: [u8; 32],
+    pub evidence_hash: [u8; 32],
     pub beneficiary: Pubkey,
     pub mint: Pubkey,
     pub amount: u64,
@@ -256,7 +261,7 @@ pub struct RevenueReceipt {
 }
 
 impl RevenueReceipt {
-    pub const SPACE: usize = 8 + 1 + 32 + 32 + 32 + 8 + 8 + 8 + 32;
+    pub const SPACE: usize = 8 + 1 + 32 + 32 + 32 + 32 + 8 + 8 + 8 + 32;
 }
 
 fn validate_production_environment(
@@ -292,6 +297,7 @@ pub enum AdapterError {
     #[msg("Referral program does not match the immutable adapter configuration")] InvalidReferralProgram,
     #[msg("Revenue event amount must be greater than zero")] ZeroAmount,
     #[msg("Revenue event ID must be non-zero")] InvalidEventId,
+    #[msg("Qualification evidence hash must be non-zero")] InvalidEvidenceHash,
     #[msg("Unsupported stablecoin mint")] UnsupportedMint,
     #[msg("Revenue source token account is not owned by the adapter revenue authority PDA")] WrongRevenueAuthority,
     #[msg("Revenue source token account is not the canonical ATA")] NonCanonicalSource,
