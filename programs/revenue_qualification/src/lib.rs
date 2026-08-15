@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::associated_token::get_associated_token_address_with_program_id;
-use anchor_spl::token::{self, Token, TokenAccount};
-use revenue_adapter::cpi;
+use anchor_spl::token::{Token, TokenAccount};
+use revenue_adapter::cpi as adapter_cpi;
 
 declare_id!("AZQHbWahShE5oLKG3BXCrqmoMj6WWtiuxhnCcMp4YoE4");
 
@@ -29,18 +29,21 @@ pub mod revenue_qualification {
     /// can sign for during CPI.
     pub fn initialize(
         ctx: Context<Initialize>,
-        evidence_program: Pubkey,
         usdt_mint: Pubkey,
         usdc_mint: Pubkey,
     ) -> Result<()> {
         require!(usdt_mint != usdc_mint, QualificationError::DuplicateMint);
-        require!(evidence_program != Pubkey::default(), QualificationError::InvalidEvidenceProgram);
-        require!(evidence_program != crate::ID, QualificationError::InvalidEvidenceProgram);
-        require!(evidence_program != ctx.accounts.adapter_program.key(), QualificationError::InvalidEvidenceProgram);
-        require!(ctx.accounts.adapter_program.key() != crate::ID, QualificationError::InvalidAdapterProgram);
-        require!(ctx.accounts.adapter_program.executable, QualificationError::InvalidAdapterProgram);
 
         let adapter_program = ctx.accounts.adapter_program.key();
+        let evidence_program = ctx.accounts.evidence_program.key();
+
+        require!(adapter_program != crate::ID, QualificationError::InvalidAdapterProgram);
+        require!(ctx.accounts.adapter_program.executable, QualificationError::InvalidAdapterProgram);
+        require!(evidence_program != Pubkey::default(), QualificationError::InvalidEvidenceProgram);
+        require!(evidence_program != crate::ID, QualificationError::InvalidEvidenceProgram);
+        require!(evidence_program != adapter_program, QualificationError::InvalidEvidenceProgram);
+        require!(ctx.accounts.evidence_program.executable, QualificationError::InvalidEvidenceProgram);
+
         let expected_adapter_config = Pubkey::find_program_address(
             &[revenue_adapter::CONFIG_SEED],
             &adapter_program,
@@ -170,14 +173,36 @@ pub mod revenue_qualification {
                 .map_err(|_| error!(QualificationError::MalformedEvidence))?
         };
 
-        require!(evidence.version == EVIDENCE_VERSION, QualificationError::UnsupportedEvidenceVersion);
+        require!(
+            evidence.version == EVIDENCE_VERSION,
+            QualificationError::UnsupportedEvidenceVersion
+        );
         require!(evidence.event_id == event_id, QualificationError::EvidenceMismatch);
-        require_keys_eq!(evidence.qualification_program, crate::ID, QualificationError::EvidenceMismatch);
-        require_keys_eq!(evidence.adapter_program, config.adapter_program, QualificationError::EvidenceMismatch);
-        require_keys_eq!(evidence.revenue_authority, config.revenue_authority, QualificationError::EvidenceMismatch);
-        require_keys_eq!(evidence.beneficiary, ctx.accounts.beneficiary.key(), QualificationError::EvidenceMismatch);
+        require_keys_eq!(
+            evidence.qualification_program,
+            crate::ID,
+            QualificationError::EvidenceMismatch
+        );
+        require_keys_eq!(
+            evidence.adapter_program,
+            config.adapter_program,
+            QualificationError::EvidenceMismatch
+        );
+        require_keys_eq!(
+            evidence.revenue_authority,
+            config.revenue_authority,
+            QualificationError::EvidenceMismatch
+        );
+        require_keys_eq!(
+            evidence.beneficiary,
+            ctx.accounts.beneficiary.key(),
+            QualificationError::EvidenceMismatch
+        );
         require!(evidence.amount == amount, QualificationError::EvidenceMismatch);
-        require!(evidence.reference_hash != [0u8; 32], QualificationError::EvidenceMismatch);
+        require!(
+            evidence.reference_hash != [0u8; 32],
+            QualificationError::EvidenceMismatch
+        );
         require!(evidence.settled_at > 0, QualificationError::EvidenceMismatch);
         require!(
             evidence.mint == config.usdt_mint || evidence.mint == config.usdc_mint,
@@ -197,16 +222,19 @@ pub mod revenue_qualification {
         let expected_source = get_associated_token_address_with_program_id(
             &config.revenue_authority,
             &evidence.mint,
-            &token::ID,
+            &anchor_spl::token::ID,
         );
         require_keys_eq!(
             ctx.accounts.source_token.key(),
             expected_source,
             QualificationError::NonCanonicalRevenueSource
         );
-        require!(ctx.accounts.source_token.amount >= amount, QualificationError::InsufficientFunding);
+        require!(
+            ctx.accounts.source_token.amount >= amount,
+            QualificationError::InsufficientFunding
+        );
 
-        let cpi_accounts = cpi::accounts::SubmitRevenueEvent {
+        let cpi_accounts = adapter_cpi::accounts::SubmitRevenueEvent {
             payer: ctx.accounts.rent_payer.to_account_info(),
             qualification_authority: ctx.accounts.qualification_authority.to_account_info(),
             config: ctx.accounts.adapter_config.to_account_info(),
@@ -235,7 +263,7 @@ pub mod revenue_qualification {
 
         let bump = [config.qualifier_authority_bump];
         let signer_seeds: &[&[u8]] = &[QUALIFIER_AUTHORITY_SEED, &bump];
-        cpi::submit_revenue_event(
+        adapter_cpi::submit_revenue_event(
             CpiContext::new_with_signer(
                 ctx.accounts.adapter_program.key(),
                 cpi_accounts,
@@ -264,6 +292,8 @@ pub struct Initialize<'info> {
     /// CHECK: deterministic gateway signer with no private key.
     #[account(seeds = [QUALIFIER_AUTHORITY_SEED], bump)]
     pub qualification_authority: UncheckedAccount<'info>,
+    /// CHECK: must be executable, distinct and is frozen into config.
+    pub evidence_program: UncheckedAccount<'info>,
     /// CHECK: exact PDA under the immutable evidence program, checked in initialize.
     pub evidence_authority: UncheckedAccount<'info>,
     /// CHECK: checked executable and frozen into config.
@@ -386,7 +416,7 @@ pub enum QualificationError {
     InvalidAdapterConfig,
     #[msg("Adapter revenue authority is invalid")]
     InvalidRevenueAuthority,
-    #[msg("Evidence program is invalid")]
+    #[msg("Evidence program is invalid or not executable")]
     InvalidEvidenceProgram,
     #[msg("Evidence authority is not the deterministic PDA of the frozen evidence program")]
     InvalidEvidenceAuthority,
