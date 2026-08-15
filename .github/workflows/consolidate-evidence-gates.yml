@@ -1,0 +1,110 @@
+name: consolidate-evidence-gates
+on:
+  push:
+    branches: [agent/revenue-adapter-v0.1]
+    paths:
+      - '.github/workflows/consolidate-evidence-gates.yml'
+permissions:
+  contents: write
+jobs:
+  consolidate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/revenue-adapter-v0.1
+      - uses: solana-foundation/github-actions/setup-all@v0.2.15
+        with:
+          solana_version: '3.1.10'
+          anchor_version: '1.1.2'
+          node_version: '24'
+      - run: cargo-build-sbf --install-only
+
+      - name: Consolidate evidence-bound callers and release gates
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          # 1. Migrate JS smoke to evidence hash if it still uses nonce naming/layout.
+          smoke = Path('scripts/qualification-localnet-smoke.mjs')
+          s = smoke.read_text()
+          if 'nonce' in s:
+              s = s.replace('nonce', 'evidence')
+          old_js = '[EVENT_DOMAIN, payer.toBuffer(), beneficiary.toBuffer(), mint.toBuffer(), u64le(amount), evidence]'
+          new_js = '[EVENT_DOMAIN, evidence, payer.toBuffer(), beneficiary.toBuffer(), mint.toBuffer(), u64le(amount)]'
+          s = s.replace(old_js, new_js)
+          smoke.write_text(s)
+
+          # 2. Migrate the compiled diagnostic LiteSVM target.
+          e2e = Path('integration-tests/tests/qualification_e2e.rs')
+          r = e2e.read_text()
+          if 'nonce' in r:
+              r = r.replace('nonce', 'evidence')
+          old_rust = '''        &[\n            revenue_qualification::EVENT_DOMAIN,\n            payer.as_ref(),\n            beneficiary.as_ref(),\n            mint.as_ref(),\n            &amount_bytes,\n            &evidence,\n        ],'''
+          new_rust = '''        &[\n            revenue_qualification::EVENT_DOMAIN,\n            &evidence,\n            payer.as_ref(),\n            beneficiary.as_ref(),\n            mint.as_ref(),\n            &amount_bytes,\n        ],'''
+          r = r.replace(old_rust, new_rust)
+          e2e.write_text(r)
+
+          # 3. Static gates: event identity must include evidence hash, not a free nonce,
+          # and core must expose an explicit fail-closed adapter identity.
+          static = Path('scripts/static-gates.py')
+          g = static.read_text()
+          g = g.replace("'&client_nonce'", "'evidence_hash.as_ref()'")
+          g = g.replace("'&evidence'", "'evidence_hash.as_ref()'")
+          g = g.replace('payer beneficiary mint amount nonce', 'evidence payer beneficiary mint amount')
+          marker = "    'production launch source/time constants exist':"
+          if 'core production adapter binding constant exists' not in g and marker in g:
+              insertion = "    'core production adapter binding constant exists': 'MAINNET_REVENUE_ADAPTER_PROGRAM' in constants,\n"
+              g = g.replace(marker, insertion + marker)
+          static.write_text(g)
+
+          # 4. The top-level pre-mainnet gate must incorporate the explicit qualification
+          # sub-gate and hash the FINAL qualification spec, not only the architecture note.
+          gate = Path('scripts/pre-mainnet-gate.py')
+          p = gate.read_text()
+          import_line = 'from qualification_release_gate import evaluate as evaluate_qualification_release\n'
+          if import_line not in p:
+              p = p.replace('from pathlib import Path\n', 'from pathlib import Path\n\n' + import_line)
+          p = p.replace(
+              'QUALIFICATION_SPEC = ROOT / "QUALIFIED_REVENUE_SOURCE_SPEC.md"',
+              'QUALIFICATION_SPEC = ROOT / "QUALIFIED_REVENUE_QUALIFICATION_SPEC.md"',
+          )
+          main_marker = '    blockers: list[str] = []\n    notes: list[str] = []\n'
+          eval_block = '''    qualification_blockers, qualification_notes = evaluate_qualification_release(ROOT)\n    blockers.extend(qualification_blockers)\n    notes.extend(qualification_notes)\n'''
+          if eval_block not in p:
+              if main_marker not in p:
+                  raise SystemExit('pre-mainnet main marker not found')
+              p = p.replace(main_marker, main_marker + '\n' + eval_block, 1)
+          gate.write_text(p)
+          PY
+
+      - name: Verify consolidated three-program graph
+        run: |
+          cargo check --locked --workspace
+          anchor build --ignore-keys
+          cargo test --locked --workspace
+          cargo test --locked --manifest-path integration-tests/Cargo.toml --all-targets --no-run
+          python3 scripts/static-gates.py
+          set +e
+          python3 scripts/qualification_release_gate.py | tee /tmp/qualification-gate.txt
+          qstatus=${PIPESTATUS[0]}
+          python3 scripts/pre-mainnet-gate.py | tee /tmp/pre-mainnet-gate.txt
+          pstatus=${PIPESTATUS[0]}
+          set -e
+          test "$qstatus" -ne 0
+          test "$pstatus" -ne 0
+          grep -q 'QUALIFIED_REVENUE_QUALIFICATION_SPEC.md is not FINAL' /tmp/qualification-gate.txt
+          grep -q 'core MAINNET_REVENUE_ADAPTER_PROGRAM is still fail-closed' /tmp/qualification-gate.txt
+          grep -q 'PDA derivation self-test passed against real-validator vectors' /tmp/pre-mainnet-gate.txt
+          grep -q 'RESULT: BLOCKED' /tmp/pre-mainnet-gate.txt
+
+      - name: Commit consolidated migration and remove temporary workflows
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scripts/qualification-localnet-smoke.mjs integration-tests/tests/qualification_e2e.rs scripts/static-gates.py scripts/pre-mainnet-gate.py
+          if [ -f .github/workflows/evidence-api-migration.yml ]; then git rm .github/workflows/evidence-api-migration.yml; fi
+          git rm .github/workflows/consolidate-evidence-gates.yml
+          git commit -m 'consolidate evidence-bound qualification release gates'
+          git push origin HEAD:agent/revenue-adapter-v0.1
