@@ -26,8 +26,6 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          # 1. Migrate the real-validator/localnet smoke from a freely variable nonce
-          # to the reviewed evidence hash and exactly mirror the on-chain PDA seed order.
           smoke = Path('scripts/qualification-localnet-smoke.mjs')
           s = smoke.read_text()
           s = s.replace(
@@ -43,8 +41,6 @@ jobs:
           s = s.replace('nonce3', 'evidenceHash3')
           smoke.write_text(s)
 
-          # 2. Migrate the LiteSVM end-to-end test to the exact current instruction ABI
-          # and exact on-chain event-id derivation.
           e2e = Path('integration-tests/tests/qualification_e2e.rs')
           r = e2e.read_text()
           r = r.replace('    nonce: [u8; 32],', '    evidence_hash: [u8; 32],')
@@ -59,19 +55,24 @@ jobs:
           if 'client_nonce:' in r or 'nonce_1' in r or 'nonce_2' in r or '&nonce' in r:
               raise SystemExit('stale nonce API remains in qualification_e2e.rs')
 
-          # LiteSVM's token-mint test helper can leave a just-created mint account present
-          # but uninitialized in this larger CPI fixture. Do not fake account bytes: inspect
-          # the real legacy SPL Mint state and, only when required, initialize it with the
-          # real SPL Token initialize_mint2 instruction before Anchor deserializes Account<Mint>.
+          # Canonicalize the two legacy SPL Mint accounts with spl-token's own Pack
+          # implementation. This makes the fixture byte-identical to what Anchor's
+          # Account<Mint> deserializer expects, instead of inferring offsets manually.
+          import_anchor = 'use solana_transaction::Transaction;\n'
+          pack_imports = '''use spl_token::solana_program::program_option::COption;\nuse spl_token::solana_program::program_pack::Pack;\n'''
+          if pack_imports not in r:
+              if import_anchor not in r:
+                  raise SystemExit('E2E import anchor not found')
+              r = r.replace(import_anchor, import_anchor + pack_imports, 1)
+
           mint_anchor = '''    let usdc_mint = ctx\n        .svm\n        .create_token_mint(&initializer, 6)\n        .expect("USDC mint");\n'''
-          mint_guard = mint_anchor + '''\n    for mint_key in [usdt_mint.pubkey(), usdc_mint.pubkey()] {\n        let before = ctx.svm.get_account(&mint_key).expect("mint account exists");\n        assert_eq!(before.owner, spl_token::id(), "mint must be owned by legacy SPL Token");\n        assert_eq!(before.data.len(), 82, "legacy SPL Mint layout must be 82 bytes");\n        if before.data[45] != 1 {\n            let initialize_mint_ix = spl_token::instruction::initialize_mint2(\n                &spl_token::id(),\n                &mint_key,\n                &initializer.pubkey(),\n                None,\n                6,\n            )\n            .expect("build initialize_mint2");\n            let initialize_mint_tx = Transaction::new_signed_with_payer(\n                &[initialize_mint_ix],\n                Some(&initializer.pubkey()),\n                &[&initializer],\n                ctx.svm.latest_blockhash(),\n            );\n            ctx.svm\n                .send_transaction(initialize_mint_tx)\n                .expect("initialize legacy SPL mint");\n        }\n        let after = ctx.svm.get_account(&mint_key).expect("initialized mint exists");\n        assert_eq!(after.owner, spl_token::id());\n        assert_eq!(after.data.len(), 82);\n        assert_eq!(after.data[45], 1, "SPL Mint must be initialized before protocol initialize");\n    }\n'''
-          if 'SPL Mint must be initialized before protocol initialize' not in r:
+          canonical_guard = mint_anchor + '''\n    for mint_key in [usdt_mint.pubkey(), usdc_mint.pubkey()] {\n        let mut mint_account = ctx.svm.get_account(&mint_key).expect("mint account exists");\n        let canonical_mint = spl_token::state::Mint {\n            mint_authority: COption::Some(initializer.pubkey()),\n            supply: 0,\n            decimals: 6,\n            is_initialized: true,\n            freeze_authority: COption::None,\n        };\n        let mut packed = vec![0u8; spl_token::state::Mint::LEN];\n        spl_token::state::Mint::pack(canonical_mint, &mut packed)\n            .expect("pack canonical SPL Mint");\n        mint_account.owner = spl_token::id();\n        mint_account.data = packed;\n        ctx.svm\n            .set_account(mint_key, mint_account)\n            .expect("set canonical SPL Mint account");\n\n        let verified_account = ctx.svm.get_account(&mint_key).expect("canonical mint exists");\n        let verified_mint = spl_token::state::Mint::unpack(&verified_account.data)\n            .expect("canonical SPL Mint must unpack as initialized");\n        assert!(verified_mint.is_initialized);\n        assert_eq!(verified_mint.decimals, 6);\n        assert_eq!(verified_mint.mint_authority, COption::Some(initializer.pubkey()));\n    }\n'''
+          if 'canonical SPL Mint must unpack as initialized' not in r:
               if mint_anchor not in r:
                   raise SystemExit('E2E mint setup anchor not found')
-              r = r.replace(mint_anchor, mint_guard, 1)
+              r = r.replace(mint_anchor, canonical_guard, 1)
           e2e.write_text(r)
 
-          # 3. Static gates now assert evidence-bound identity and explicit core adapter binding.
           static = Path('scripts/static-gates.py')
           g = static.read_text()
           old_check = "    'qualification event identity binds payer beneficiary mint amount nonce': all(x in qualification for x in ['payer_key.as_ref()', 'beneficiary_key.as_ref()', 'mint.as_ref()', '&amount_bytes', '&client_nonce']),"
@@ -91,8 +92,6 @@ jobs:
               raise SystemExit('stale nonce static gate remains')
           static.write_text(g)
 
-          # 4. Top-level gate delegates to the dedicated qualification release gate and
-          # hashes the final qualification specification rather than the architecture note.
           gate = Path('scripts/pre-mainnet-gate.py')
           p = gate.read_text()
           import_line = 'from qualification_release_gate import evaluate as evaluate_qualification_release\n'
