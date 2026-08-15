@@ -20,6 +20,10 @@ fn verified_evidence_chain_is_collateralized_atomic_and_replay_safe() {
         (test_revenue_evidence_stub::ID, EVIDENCE_BYTES),
     ]);
 
+    // LiteSVM starts at Unix timestamp 0. Production evidence requires a
+    // strictly positive settlement timestamp, so pin the test clock explicitly.
+    ctx.svm.warp_to_timestamp(1_700_000_000);
+
     let core = Program::new(service_referral_protocol::ID);
     let adapter = Program::new(revenue_adapter::ID);
     let qualification = Program::new(revenue_qualification::ID);
