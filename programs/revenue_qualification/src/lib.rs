@@ -17,15 +17,16 @@ pub const MAINNET_USDC_MINT: Pubkey = pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wE
 pub mod revenue_qualification {
     use super::*;
 
-    /// Qualifies revenue only when the caller funds it with real SPL tokens.
-    /// The transfer, adapter receipt creation and referral accounting are atomic.
+    /// Routes revenue only when the caller funds it with real SPL tokens and
+    /// supplies a non-zero evidence hash from the reviewed qualification layer.
+    /// Transfer, adapter receipt creation and referral accounting are atomic.
     pub fn qualify_payment_and_route(
         ctx: Context<QualifyPaymentAndRoute>,
-        client_nonce: [u8; 32],
+        evidence_hash: [u8; 32],
         amount: u64,
     ) -> Result<()> {
         require!(amount > 0, QualificationError::ZeroAmount);
-        require!(client_nonce != [0u8; 32], QualificationError::InvalidNonce);
+        require!(evidence_hash != [0u8; 32], QualificationError::InvalidEvidenceHash);
 
         let mint = ctx.accounts.payer_source_token.mint;
         require!(
@@ -35,9 +36,8 @@ pub mod revenue_qualification {
         );
         validate_production_environment(ctx.accounts.adapter_program.key(), mint)?;
 
-        // Do not merely trust an account discriminator + owner. Re-derive the one
-        // canonical adapter config PDA so a substitute adapter-owned config can never
-        // alter the frozen trust chain, even if the adapter evolves before finalization.
+        // Re-derive the one canonical adapter config PDA so a substitute adapter-owned
+        // config can never alter the frozen trust chain.
         let expected_adapter_config = Pubkey::find_program_address(
             &[revenue_adapter::CONFIG_SEED],
             &ctx.accounts.adapter_program.key(),
@@ -103,20 +103,20 @@ pub mod revenue_qualification {
             QualificationError::NonCanonicalRevenueSource
         );
 
-        // Bind the replay key to payer, beneficiary, mint, amount and nonce using
-        // Solana's deterministic PDA derivation. The resulting 32-byte address is
-        // used only as an event identifier; no account is created at this PDA.
+        // Economic replay identity is derived from the evidence itself, not from a
+        // freely variable nonce. The final evidence producer must guarantee that one
+        // underlying economic event has one canonical evidence hash.
         let payer_key = ctx.accounts.payer.key();
         let beneficiary_key = ctx.accounts.beneficiary.key();
         let amount_bytes = amount.to_le_bytes();
         let event_id = Pubkey::find_program_address(
             &[
                 EVENT_DOMAIN,
+                evidence_hash.as_ref(),
                 payer_key.as_ref(),
                 beneficiary_key.as_ref(),
                 mint.as_ref(),
                 &amount_bytes,
-                &client_nonce,
             ],
             &crate::ID,
         )
@@ -135,7 +135,7 @@ pub mod revenue_qualification {
         );
 
         // First move real value into the adapter-owned revenue source ATA.
-        // If any later CPI fails, Solana rolls this transfer back atomically.
+        // Any later CPI failure rolls this transfer back atomically.
         token::transfer(
             CpiContext::new(
                 ctx.accounts.token_program.key(),
@@ -184,11 +184,13 @@ pub mod revenue_qualification {
                 &[signer_seeds],
             ),
             event_id,
+            evidence_hash,
             amount,
         )?;
 
         emit!(RevenueQualified {
             event_id,
+            evidence_hash,
             payer: payer_key,
             beneficiary: beneficiary_key,
             mint,
@@ -270,6 +272,7 @@ pub struct QualifyPaymentAndRoute<'info> {
 #[event]
 pub struct RevenueQualified {
     pub event_id: [u8; 32],
+    pub evidence_hash: [u8; 32],
     pub payer: Pubkey,
     pub beneficiary: Pubkey,
     pub mint: Pubkey,
@@ -304,8 +307,8 @@ fn validate_production_environment(adapter_program: Pubkey, mint: Pubkey) -> Res
 pub enum QualificationError {
     #[msg("Revenue amount must be greater than zero")]
     ZeroAmount,
-    #[msg("Client nonce must be non-zero")]
-    InvalidNonce,
+    #[msg("Qualification evidence hash must be non-zero")]
+    InvalidEvidenceHash,
     #[msg("Unsupported stablecoin mint")]
     UnsupportedMint,
     #[msg("Adapter config is not the canonical adapter-config PDA")]
@@ -326,7 +329,7 @@ pub enum QualificationError {
     MintMismatch,
     #[msg("Revenue destination is not the canonical adapter revenue ATA")]
     NonCanonicalRevenueSource,
-    #[msg("Adapter receipt PDA does not match derived event id")]
+    #[msg("Adapter receipt PDA does not match evidence-bound event id")]
     InvalidAdapterReceipt,
     #[msg("Production adapter identity has not been frozen")]
     ProductionConfigNotFrozen,
