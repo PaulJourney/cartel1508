@@ -1,5 +1,5 @@
 name: revenue-qualification-e2e-lock-sync
-# Fresh run after the deterministic positive LiteSVM clock fixture was committed.
+# Fresh run after switching the E2E fixture to LiteSVM's locked Clock sysvar API.
 on:
   push:
     branches: [agent/revenue-qualification-e2e]
