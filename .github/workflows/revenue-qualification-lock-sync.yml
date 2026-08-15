@@ -2,6 +2,9 @@ name: revenue-qualification-lock-sync
 on:
   push:
     branches: [agent/revenue-qualification-v0.1]
+concurrency:
+  group: revenue-qualification-lock-sync
+  cancel-in-progress: true
 permissions:
   contents: write
 jobs:
