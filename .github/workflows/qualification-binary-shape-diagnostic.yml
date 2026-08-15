@@ -1,0 +1,122 @@
+name: qualification-binary-shape-diagnostic
+on:
+  push:
+    branches: [agent/revenue-adapter-v0.1]
+    paths:
+      - '.github/workflows/qualification-binary-shape-diagnostic.yml'
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/revenue-adapter-v0.1
+      - uses: solana-foundation/github-actions/setup-all@v0.2.15
+        with:
+          solana_version: '3.1.10'
+          anchor_version: '1.1.2'
+          node_version: '24'
+      - run: cargo-build-sbf --install-only
+      - name: Create transient full-shape bootstrap test
+        run: |
+          cat > integration-tests/tests/qualification_binary_shape_probe.rs <<'RS'
+          use anchor_lang::{prelude::*, AccountDeserialize};
+          use anchor_litesvm::{AnchorLiteSVM, AssertionHelpers, ProgramTestExt, TestHelpers};
+          use revenue_adapter::{RevenueReceipt, CONFIG_SEED, RECEIPT_SEED, REVENUE_AUTHORITY_SEED};
+          use service_referral_protocol::state::UserState;
+          use solana_signer::Signer;
+          use solana_transaction::Transaction;
+
+          const REFERRAL_BYTES: &[u8] = include_bytes!("../../target/deploy/service_referral_protocol.so");
+          const ADAPTER_BYTES: &[u8] = include_bytes!("../../target/deploy/revenue_adapter.so");
+          const QUALIFICATION_BYTES: &[u8] = include_bytes!("../../target/deploy/revenue_qualification.so");
+          const UNIT: u64 = 1_000_000;
+
+          fn derived_event_id(
+              payer: Pubkey,
+              beneficiary: Pubkey,
+              mint: Pubkey,
+              amount: u64,
+              evidence_hash: [u8; 32],
+          ) -> [u8; 32] {
+              let amount_bytes = amount.to_le_bytes();
+              Pubkey::find_program_address(
+                  &[
+                      revenue_qualification::EVENT_DOMAIN,
+                      evidence_hash.as_ref(),
+                      payer.as_ref(),
+                      beneficiary.as_ref(),
+                      mint.as_ref(),
+                      &amount_bytes,
+                  ],
+                  &revenue_qualification::ID,
+              ).0.to_bytes()
+          }
+
+          #[test]
+          fn full_binary_shape_still_bootstraps_referral_core() {
+              // Force the same downstream objects and static program images into this test binary.
+              assert!(!ADAPTER_BYTES.is_empty());
+              assert!(!QUALIFICATION_BYTES.is_empty());
+              assert!(core::mem::size_of::<RevenueReceipt>() > 0);
+              assert!(core::mem::size_of::<UserState>() > 0);
+              let _ = RECEIPT_SEED;
+              let _ = UNIT;
+              let _ = Transaction::default;
+              let _ = derived_event_id(Pubkey::new_unique(), Pubkey::new_unique(), Pubkey::new_unique(), 1, [1u8; 32]);
+
+              let mut ctx = AnchorLiteSVM::build_with_program(service_referral_protocol::ID, REFERRAL_BYTES);
+              let initializer = ctx.svm.create_funded_account(40_000_000_000).expect("initializer");
+              let treasury = ctx.svm.create_funded_account(10_000_000_000).expect("treasury");
+              let user = ctx.svm.create_funded_account(10_000_000_000).expect("registered beneficiary");
+              let _customer = ctx.svm.create_funded_account(10_000_000_000).expect("external customer payer");
+
+              let usdt_mint = ctx.svm.create_token_mint(&initializer, 6).expect("USDT mint");
+              let usdc_mint = ctx.svm.create_token_mint(&initializer, 6).expect("USDC mint");
+
+              let (protocol_pda, _) = Pubkey::find_program_address(&[b"protocol"], &service_referral_protocol::ID);
+              let (vault_authority, _) = Pubkey::find_program_address(&[b"vault-authority"], &service_referral_protocol::ID);
+              let (technical_root, _) = Pubkey::find_program_address(&[b"user", Pubkey::default().as_ref()], &service_referral_protocol::ID);
+              let (_user_pda, _) = Pubkey::find_program_address(&[b"user", user.pubkey().as_ref()], &service_referral_protocol::ID);
+              let (_batch_pda, _) = Pubkey::find_program_address(&[b"batch", user.pubkey().as_ref(), &0u64.to_le_bytes()], &service_referral_protocol::ID);
+              let (_adapter_config, _) = Pubkey::find_program_address(&[CONFIG_SEED], &revenue_adapter::ID);
+              let (revenue_authority, _) = Pubkey::find_program_address(&[REVENUE_AUTHORITY_SEED], &revenue_adapter::ID);
+              let (_qualification_authority, _) = Pubkey::find_program_address(&[revenue_qualification::QUALIFIER_AUTHORITY_SEED], &revenue_qualification::ID);
+
+              for mint_key in [usdt_mint.pubkey(), usdc_mint.pubkey()] {
+                  let a = ctx.svm.get_account(&mint_key).expect("mint exists");
+                  assert_eq!(a.owner, spl_token::id());
+                  assert_eq!(a.data.len(), 82);
+                  assert_eq!(a.data[44], 6);
+                  assert_eq!(a.data[45], 1);
+              }
+
+              let registration_open_at = ctx.svm.get_sysvar::<Clock>().unix_timestamp;
+              let ix = ctx.program()
+                  .accounts(service_referral_protocol::accounts::Initialize {
+                      initializer: initializer.pubkey(),
+                      service_treasury: treasury.pubkey(),
+                      usdt_mint: usdt_mint.pubkey(),
+                      usdc_mint: usdc_mint.pubkey(),
+                      protocol: protocol_pda,
+                      vault_authority,
+                      technical_root,
+                      system_program: anchor_lang::system_program::ID,
+                  })
+                  .args(service_referral_protocol::instruction::Initialize {
+                      registration_open_at,
+                      qualified_revenue_source: revenue_authority,
+                  })
+                  .instruction().expect("initialize ix");
+              ctx.execute_instruction(ix, &[&initializer]).expect("initialize tx").assert_success();
+              assert!(ctx.svm.get_account(&protocol_pda).is_some());
+              assert!(ctx.svm.get_account(&technical_root).is_some());
+          }
+          RS
+      - name: Build and run binary-shape probe
+        run: |
+          anchor build --ignore-keys
+          cargo test --manifest-path integration-tests/Cargo.toml --test qualification_binary_shape_probe --no-run
+          cargo test --manifest-path integration-tests/Cargo.toml --test qualification_binary_shape_probe -- --nocapture
