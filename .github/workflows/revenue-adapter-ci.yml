@@ -1,0 +1,43 @@
+name: revenue-adapter-ci
+on:
+  push:
+    branches: [agent/revenue-adapter-v0.1]
+    paths:
+      - 'programs/revenue_adapter/**'
+      - 'programs/service_referral_protocol/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Anchor.toml'
+      - '.github/workflows/revenue-adapter-ci.yml'
+  pull_request:
+    paths:
+      - 'programs/revenue_adapter/**'
+      - 'programs/service_referral_protocol/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Anchor.toml'
+permissions:
+  contents: read
+jobs:
+  adapter-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: solana-foundation/github-actions/setup-all@v0.2.15
+        with:
+          solana_version: '3.1.10'
+          anchor_version: '1.1.2'
+          node_version: '24'
+      - run: cargo-build-sbf --install-only
+      - name: Verify locked dependency graph
+        run: cargo check --locked --workspace
+      - name: Run Rust tests
+        run: cargo test --locked --workspace
+      - name: Build both Anchor programs
+        run: anchor build --ignore-keys
+      - name: Build production feature graph
+        run: cargo check --locked --workspace --features production
+      - name: Preserve artifact hashes
+        run: |
+          sha256sum target/deploy/service_referral_protocol.so
+          sha256sum target/deploy/revenue_adapter.so
