@@ -18,7 +18,10 @@ pub const LEGACY_TOKEN_PROGRAM: Pubkey = anchor_spl::token::ID;
 pub const MAINNET_USDT_MINT: Pubkey = pubkey!("Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB");
 pub const MAINNET_USDC_MINT: Pubkey = pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
 pub const MAINNET_SERVICE_TREASURY: Pubkey = pubkey!("AepYo8xanmKuRiLVeYQuCTJoQr1nyKiTApoKwHMEg8fn");
-// Fail-closed launch sentinels. Replace only during the final reviewed mainnet freeze.
+
+// Fail-closed launch sentinels. The final release binds both the adapter executable
+// and the Revenue Authority PDA mathematically derived from that executable.
+pub const MAINNET_REVENUE_ADAPTER_PROGRAM: Pubkey = Pubkey::new_from_array([0u8; 32]);
 pub const MAINNET_QUALIFIED_REVENUE_SOURCE: Pubkey = pubkey!("11111111111111111111111111111111");
 pub const MAINNET_REGISTRATION_OPEN_AT: i64 = 0;
 
