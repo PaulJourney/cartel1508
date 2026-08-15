@@ -395,7 +395,9 @@ fn verifier_pda_authorization_replay_and_downstream_rollback_hold_end_to_end() {
     assert_eq!(receipt.mint, usdc_mint.pubkey());
     assert_eq!(receipt.amount, 100 * UNIT);
 
-    // Re-fund the source and prove the same event cannot be consumed twice.
+    // LiteSVM deduplicates identical transactions under the same recent
+    // blockhash. Advance it before issuing the same mint_to shape again.
+    ctx.svm.expire_blockhash();
     ctx.svm
         .mint_to(&usdc_mint.pubkey(), &revenue_usdc, &initializer, 100 * UNIT)
         .expect("refund source for replay test");
