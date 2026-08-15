@@ -4,6 +4,7 @@ on:
     branches: [agent/revenue-adapter-v0.1]
     paths:
       - 'programs/revenue_adapter/**'
+      - 'programs/revenue_qualification/**'
       - 'programs/service_referral_protocol/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
@@ -12,6 +13,7 @@ on:
   pull_request:
     paths:
       - 'programs/revenue_adapter/**'
+      - 'programs/revenue_qualification/**'
       - 'programs/service_referral_protocol/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
@@ -33,7 +35,7 @@ jobs:
         run: cargo check --locked --workspace
       - name: Run Rust tests
         run: cargo test --locked --workspace
-      - name: Build both Anchor programs
+      - name: Build all three Anchor programs
         run: anchor build --ignore-keys
       - name: Build production feature graph
         run: cargo check --locked --workspace --features production
@@ -41,3 +43,4 @@ jobs:
         run: |
           sha256sum target/deploy/service_referral_protocol.so
           sha256sum target/deploy/revenue_adapter.so
+          sha256sum target/deploy/revenue_qualification.so
