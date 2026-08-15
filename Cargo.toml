@@ -1,5 +1,8 @@
 [workspace]
-members = ["programs/service_referral_protocol"]
+members = [
+  "programs/service_referral_protocol",
+  "programs/revenue_adapter",
+]
 exclude = ["integration-tests"]
 resolver = "2"
 
