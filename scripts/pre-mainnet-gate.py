@@ -18,10 +18,19 @@ QUALIFICATION_LIB = ROOT / "programs/revenue_qualification/src/lib.rs"
 ANCHOR = ROOT / "Anchor.toml"
 QUALIFICATION_SPEC = ROOT / "QUALIFIED_REVENUE_SOURCE_SPEC.md"
 MANIFEST = ROOT / "release/mainnet-release.json"
-ARTIFACTS = {
-    "referral_so_sha256": ROOT / "target/deploy/service_referral_protocol.so",
-    "revenue_adapter_so_sha256": ROOT / "target/deploy/revenue_adapter.so",
-    "revenue_qualification_so_sha256": ROOT / "target/deploy/revenue_qualification.so",
+ARTIFACT_CANDIDATES = {
+    "referral_so_sha256": [
+        ROOT / "target/verifiable/service_referral_protocol.so",
+        ROOT / "target/deploy/service_referral_protocol.so",
+    ],
+    "revenue_adapter_so_sha256": [
+        ROOT / "target/verifiable/revenue_adapter.so",
+        ROOT / "target/deploy/revenue_adapter.so",
+    ],
+    "revenue_qualification_so_sha256": [
+        ROOT / "target/verifiable/revenue_qualification.so",
+        ROOT / "target/deploy/revenue_qualification.so",
+    ],
 }
 
 EXPECTED = {
@@ -81,6 +90,13 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def select_artifact(candidates: list[Path]) -> Path | None:
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def git_output(*args: str) -> str | None:
@@ -332,11 +348,13 @@ def main() -> int:
             blockers.append("release manifest commit_sha does not match current git HEAD")
 
         artifact_hashes: dict[str, str | None] = {}
-        for hash_field, artifact in ARTIFACTS.items():
+        for hash_field, candidates in ARTIFACT_CANDIDATES.items():
             expected_hash = require_sha256(blockers, manifest, hash_field)
             artifact_hashes[hash_field] = expected_hash
-            if not artifact.exists():
-                blockers.append(f"production artifact is missing: {artifact.relative_to(ROOT)}")
+            artifact = select_artifact(candidates)
+            if artifact is None:
+                locations = ", ".join(str(p.relative_to(ROOT)) for p in candidates)
+                blockers.append(f"production artifact is missing; checked: {locations}")
             elif expected_hash:
                 actual_hash = sha256_file(artifact)
                 if actual_hash != expected_hash:
@@ -344,7 +362,9 @@ def main() -> int:
                         f"{artifact.name} SHA-256 does not match release manifest"
                     )
                 else:
-                    notes.append(f"artifact SHA-256 verified: {artifact.name} {actual_hash}")
+                    notes.append(
+                        f"artifact SHA-256 verified: {artifact.relative_to(ROOT)} {actual_hash}"
+                    )
 
         audit_hash = require_sha256(blockers, manifest, "audit_report_sha256")
         qualification_spec_hash = require_sha256(
