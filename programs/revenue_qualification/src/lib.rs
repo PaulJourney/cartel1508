@@ -1,16 +1,19 @@
 use anchor_lang::prelude::*;
 use anchor_spl::associated_token::get_associated_token_address_with_program_id;
-use anchor_spl::token::{self, Token, TokenAccount, Transfer};
+use anchor_spl::token::{self, Token, TokenAccount};
 use revenue_adapter::cpi;
 
 declare_id!("AZQHbWahShE5oLKG3BXCrqmoMj6WWtiuxhnCcMp4YoE4");
 
 pub const CONFIG_SEED: &[u8] = b"qualification-config";
 pub const QUALIFIER_AUTHORITY_SEED: &[u8] = b"qualified-revenue-authority";
+pub const EVIDENCE_AUTHORITY_SEED: &[u8] = b"revenue-evidence-authority";
+pub const EVIDENCE_SEED: &[u8] = b"revenue-evidence";
+pub const EVIDENCE_VERSION: u8 = 1;
 
-// Fail-closed production sentinel. Freeze this to the reviewed adapter Program ID
-// only during the final mainnet release ceremony.
+// Fail-closed production sentinels. Replace only during the final reviewed freeze.
 pub const MAINNET_ADAPTER_PROGRAM: Pubkey = pubkey!("11111111111111111111111111111111");
+pub const MAINNET_EVIDENCE_PROGRAM: Pubkey = pubkey!("11111111111111111111111111111111");
 pub const MAINNET_USDT_MINT: Pubkey = pubkey!("Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB");
 pub const MAINNET_USDC_MINT: Pubkey = pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
 
@@ -18,15 +21,23 @@ pub const MAINNET_USDC_MINT: Pubkey = pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wE
 pub mod revenue_qualification {
     use super::*;
 
-    /// One-shot immutable configuration. The adapter must already be deployed and
-    /// initialized; no update/admin instruction exists after this account is created.
+    /// One-shot immutable gateway configuration.
+    ///
+    /// The real revenue semantics live in a separately reviewed immutable evidence
+    /// program. This gateway cannot be called directly by a human to fabricate an
+    /// event because `evidence_authority` is a PDA that only that evidence program
+    /// can sign for during CPI.
     pub fn initialize(
         ctx: Context<Initialize>,
+        evidence_program: Pubkey,
         usdt_mint: Pubkey,
         usdc_mint: Pubkey,
     ) -> Result<()> {
         require!(usdt_mint != usdc_mint, QualificationError::DuplicateMint);
-        require_keys_neq!(ctx.accounts.adapter_program.key(), crate::ID, QualificationError::InvalidAdapterProgram);
+        require!(evidence_program != Pubkey::default(), QualificationError::InvalidEvidenceProgram);
+        require!(evidence_program != crate::ID, QualificationError::InvalidEvidenceProgram);
+        require!(evidence_program != ctx.accounts.adapter_program.key(), QualificationError::InvalidEvidenceProgram);
+        require!(ctx.accounts.adapter_program.key() != crate::ID, QualificationError::InvalidAdapterProgram);
         require!(ctx.accounts.adapter_program.executable, QualificationError::InvalidAdapterProgram);
 
         let adapter_program = ctx.accounts.adapter_program.key();
@@ -45,6 +56,16 @@ pub mod revenue_qualification {
             QualificationError::InvalidAdapterConfig
         );
 
+        let expected_evidence_authority = Pubkey::find_program_address(
+            &[EVIDENCE_AUTHORITY_SEED],
+            &evidence_program,
+        ).0;
+        require_keys_eq!(
+            ctx.accounts.evidence_authority.key(),
+            expected_evidence_authority,
+            QualificationError::InvalidEvidenceAuthority
+        );
+
         let revenue_authority = Pubkey::find_program_address(
             &[revenue_adapter::REVENUE_AUTHORITY_SEED],
             &adapter_program,
@@ -53,12 +74,18 @@ pub mod revenue_qualification {
         #[cfg(feature = "production")]
         {
             require!(
-                MAINNET_ADAPTER_PROGRAM != Pubkey::default(),
+                MAINNET_ADAPTER_PROGRAM != Pubkey::default()
+                    && MAINNET_EVIDENCE_PROGRAM != Pubkey::default(),
                 QualificationError::ProductionNotFrozen
             );
             require_keys_eq!(
                 adapter_program,
                 MAINNET_ADAPTER_PROGRAM,
+                QualificationError::ProductionIdentityMismatch
+            );
+            require_keys_eq!(
+                evidence_program,
+                MAINNET_EVIDENCE_PROGRAM,
                 QualificationError::ProductionIdentityMismatch
             );
             require_keys_eq!(
@@ -79,17 +106,19 @@ pub mod revenue_qualification {
         config.adapter_program = adapter_program;
         config.adapter_config = expected_adapter_config;
         config.revenue_authority = revenue_authority;
+        config.evidence_program = evidence_program;
+        config.evidence_authority = expected_evidence_authority;
         config.usdt_mint = usdt_mint;
         config.usdc_mint = usdc_mint;
         config.initialized_at = Clock::get()?.unix_timestamp;
         Ok(())
     }
 
-    /// A revenue event is qualified only by an actual stablecoin payment made in
-    /// this same atomic transaction. If any downstream adapter/referral check fails,
-    /// Solana rolls back both the payment and all receipt/accounting mutations.
-    pub fn pay_and_qualify<'info>(
-        ctx: Context<'_, '_, '_, 'info, PayAndQualify<'info>>,
+    /// Consume one immutable evidence PDA and forward the already-funded event to
+    /// the adapter. Direct user calls cannot satisfy the evidence-authority signer.
+    /// The adapter remains the anti-replay and collateralization boundary.
+    pub fn qualify_verified_evidence<'info>(
+        ctx: Context<'_, '_, '_, 'info, QualifyVerifiedEvidence<'info>>,
         event_id: [u8; 32],
         amount: u64,
     ) -> Result<()> {
@@ -97,6 +126,11 @@ pub mod revenue_qualification {
         require!(event_id != [0u8; 32], QualificationError::InvalidEventId);
 
         let config = &ctx.accounts.config;
+        require_keys_eq!(
+            ctx.accounts.evidence_authority.key(),
+            config.evidence_authority,
+            QualificationError::InvalidEvidenceAuthority
+        );
         require_keys_eq!(
             ctx.accounts.adapter_program.key(),
             config.adapter_program,
@@ -114,71 +148,71 @@ pub mod revenue_qualification {
             QualificationError::InvalidRevenueAuthority
         );
 
-        let mint = ctx.accounts.payer_token.mint;
+        let expected_evidence = Pubkey::find_program_address(
+            &[EVIDENCE_SEED, event_id.as_ref()],
+            &config.evidence_program,
+        ).0;
+        require_keys_eq!(
+            ctx.accounts.evidence.key(),
+            expected_evidence,
+            QualificationError::InvalidEvidenceAccount
+        );
+        require_keys_eq!(
+            *ctx.accounts.evidence.owner,
+            config.evidence_program,
+            QualificationError::InvalidEvidenceAccount
+        );
+
+        let evidence = {
+            let data = ctx.accounts.evidence.try_borrow_data()?;
+            let mut slice: &[u8] = &data;
+            RevenueEvidenceV1::deserialize(&mut slice)
+                .map_err(|_| error!(QualificationError::MalformedEvidence))?
+        };
+
+        require!(evidence.version == EVIDENCE_VERSION, QualificationError::UnsupportedEvidenceVersion);
+        require!(evidence.event_id == event_id, QualificationError::EvidenceMismatch);
+        require_keys_eq!(evidence.qualification_program, crate::ID, QualificationError::EvidenceMismatch);
+        require_keys_eq!(evidence.adapter_program, config.adapter_program, QualificationError::EvidenceMismatch);
+        require_keys_eq!(evidence.revenue_authority, config.revenue_authority, QualificationError::EvidenceMismatch);
+        require_keys_eq!(evidence.beneficiary, ctx.accounts.beneficiary.key(), QualificationError::EvidenceMismatch);
+        require!(evidence.amount == amount, QualificationError::EvidenceMismatch);
+        require!(evidence.reference_hash != [0u8; 32], QualificationError::EvidenceMismatch);
+        require!(evidence.settled_at > 0, QualificationError::EvidenceMismatch);
         require!(
-            mint == config.usdt_mint || mint == config.usdc_mint,
+            evidence.mint == config.usdt_mint || evidence.mint == config.usdc_mint,
             QualificationError::UnsupportedMint
         );
+
         require_keys_eq!(
-            ctx.accounts.payer_token.owner,
-            ctx.accounts.payer.key(),
-            QualificationError::WrongPayerAuthority
-        );
-        require_keys_eq!(
-            ctx.accounts.revenue_token.owner,
+            ctx.accounts.source_token.owner,
             config.revenue_authority,
             QualificationError::InvalidRevenueAuthority
         );
         require_keys_eq!(
-            ctx.accounts.revenue_token.mint,
-            mint,
-            QualificationError::MintMismatch
+            ctx.accounts.source_token.mint,
+            evidence.mint,
+            QualificationError::EvidenceMismatch
         );
-
-        let expected_payer_ata = get_associated_token_address_with_program_id(
-            &ctx.accounts.payer.key(),
-            &mint,
-            &token::ID,
-        );
-        require_keys_eq!(
-            ctx.accounts.payer_token.key(),
-            expected_payer_ata,
-            QualificationError::NonCanonicalPayerSource
-        );
-        let expected_revenue_ata = get_associated_token_address_with_program_id(
+        let expected_source = get_associated_token_address_with_program_id(
             &config.revenue_authority,
-            &mint,
+            &evidence.mint,
             &token::ID,
         );
         require_keys_eq!(
-            ctx.accounts.revenue_token.key(),
-            expected_revenue_ata,
-            QualificationError::NonCanonicalRevenueDestination
+            ctx.accounts.source_token.key(),
+            expected_source,
+            QualificationError::NonCanonicalRevenueSource
         );
-        require!(
-            ctx.accounts.payer_token.amount >= amount,
-            QualificationError::InsufficientPaymentBalance
-        );
-
-        token::transfer(
-            CpiContext::new(
-                token::ID,
-                Transfer {
-                    from: ctx.accounts.payer_token.to_account_info(),
-                    to: ctx.accounts.revenue_token.to_account_info(),
-                    authority: ctx.accounts.payer.to_account_info(),
-                },
-            ),
-            amount,
-        )?;
+        require!(ctx.accounts.source_token.amount >= amount, QualificationError::InsufficientFunding);
 
         let cpi_accounts = cpi::accounts::SubmitRevenueEvent {
-            payer: ctx.accounts.payer.to_account_info(),
+            payer: ctx.accounts.rent_payer.to_account_info(),
             qualification_authority: ctx.accounts.qualification_authority.to_account_info(),
             config: ctx.accounts.adapter_config.to_account_info(),
             revenue_authority: ctx.accounts.adapter_revenue_authority.to_account_info(),
             receipt: ctx.accounts.adapter_receipt.to_account_info(),
-            source_token: ctx.accounts.revenue_token.to_account_info(),
+            source_token: ctx.accounts.source_token.to_account_info(),
             referral_program: ctx.accounts.referral_program.to_account_info(),
             protocol: ctx.accounts.protocol.to_account_info(),
             vault_authority: ctx.accounts.vault_authority.to_account_info(),
@@ -227,9 +261,11 @@ pub struct Initialize<'info> {
         space = QualificationConfig::SPACE
     )]
     pub config: Account<'info, QualificationConfig>,
-    /// CHECK: deterministic program signer with no private key.
+    /// CHECK: deterministic gateway signer with no private key.
     #[account(seeds = [QUALIFIER_AUTHORITY_SEED], bump)]
     pub qualification_authority: UncheckedAccount<'info>,
+    /// CHECK: exact PDA under the immutable evidence program, checked in initialize.
+    pub evidence_authority: UncheckedAccount<'info>,
     /// CHECK: checked executable and frozen into config.
     pub adapter_program: UncheckedAccount<'info>,
     /// CHECK: canonical PDA and owner validated in initialize.
@@ -239,18 +275,19 @@ pub struct Initialize<'info> {
 
 #[derive(Accounts)]
 #[instruction(event_id: [u8; 32])]
-pub struct PayAndQualify<'info> {
+pub struct QualifyVerifiedEvidence<'info> {
+    /// Rent payer for the adapter receipt only; this signer cannot qualify an event.
     #[account(mut)]
-    pub payer: Signer<'info>,
+    pub rent_payer: Signer<'info>,
+    /// Only the frozen evidence program can make this PDA a signer via CPI.
+    pub evidence_authority: Signer<'info>,
     #[account(seeds = [CONFIG_SEED], bump = config.bump)]
     pub config: Account<'info, QualificationConfig>,
-    /// CHECK: PDA signs only the adapter CPI.
+    /// CHECK: this program's PDA signs only the adapter CPI.
     #[account(seeds = [QUALIFIER_AUTHORITY_SEED], bump = config.qualifier_authority_bump)]
     pub qualification_authority: UncheckedAccount<'info>,
-    #[account(mut)]
-    pub payer_token: Account<'info, TokenAccount>,
-    #[account(mut)]
-    pub revenue_token: Account<'info, TokenAccount>,
+    /// CHECK: canonical evidence PDA and owner are verified, then fixed-format data is parsed.
+    pub evidence: UncheckedAccount<'info>,
 
     /// CHECK: exact executable address frozen in QualificationConfig.
     pub adapter_program: UncheckedAccount<'info>,
@@ -261,6 +298,8 @@ pub struct PayAndQualify<'info> {
     /// CHECK: initialized atomically by adapter; event_id seeds are enforced there.
     #[account(mut)]
     pub adapter_receipt: UncheckedAccount<'info>,
+    #[account(mut)]
+    pub source_token: Account<'info, TokenAccount>,
 
     /// CHECK: validated and frozen by adapter/referral protocol.
     pub referral_program: UncheckedAccount<'info>,
@@ -275,7 +314,7 @@ pub struct PayAndQualify<'info> {
     /// CHECK: validated downstream.
     #[account(mut)]
     pub service_treasury_token: UncheckedAccount<'info>,
-    /// CHECK: validated as a real UserState PDA by referral protocol.
+    /// CHECK: key is bound into immutable external evidence and validated downstream.
     #[account(mut)]
     pub beneficiary: UncheckedAccount<'info>,
     /// CHECK: immutable ancestry validated downstream.
@@ -310,13 +349,31 @@ pub struct QualificationConfig {
     pub adapter_program: Pubkey,
     pub adapter_config: Pubkey,
     pub revenue_authority: Pubkey,
+    pub evidence_program: Pubkey,
+    pub evidence_authority: Pubkey,
     pub usdt_mint: Pubkey,
     pub usdc_mint: Pubkey,
     pub initialized_at: i64,
 }
 
 impl QualificationConfig {
-    pub const SPACE: usize = 8 + 1 + 1 + (32 * 5) + 8;
+    pub const SPACE: usize = 8 + 1 + 1 + (32 * 7) + 8;
+}
+
+/// Canonical cross-program evidence interface. The immutable evidence program
+/// owns the PDA `["revenue-evidence", event_id]` and serializes exactly this data.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq)]
+pub struct RevenueEvidenceV1 {
+    pub version: u8,
+    pub event_id: [u8; 32],
+    pub qualification_program: Pubkey,
+    pub adapter_program: Pubkey,
+    pub revenue_authority: Pubkey,
+    pub beneficiary: Pubkey,
+    pub mint: Pubkey,
+    pub amount: u64,
+    pub settled_at: i64,
+    pub reference_hash: [u8; 32],
 }
 
 #[error_code]
@@ -329,6 +386,18 @@ pub enum QualificationError {
     InvalidAdapterConfig,
     #[msg("Adapter revenue authority is invalid")]
     InvalidRevenueAuthority,
+    #[msg("Evidence program is invalid")]
+    InvalidEvidenceProgram,
+    #[msg("Evidence authority is not the deterministic PDA of the frozen evidence program")]
+    InvalidEvidenceAuthority,
+    #[msg("Evidence account is not the canonical PDA owned by the frozen evidence program")]
+    InvalidEvidenceAccount,
+    #[msg("Evidence account data is malformed")]
+    MalformedEvidence,
+    #[msg("Evidence version is unsupported")]
+    UnsupportedEvidenceVersion,
+    #[msg("Evidence fields do not match the requested revenue event")]
+    EvidenceMismatch,
     #[msg("Production identities have not been frozen")]
     ProductionNotFrozen,
     #[msg("Runtime identities do not match the reviewed production freeze")]
@@ -339,14 +408,8 @@ pub enum QualificationError {
     InvalidEventId,
     #[msg("Unsupported stablecoin mint")]
     UnsupportedMint,
-    #[msg("Payer does not own the payment token account")]
-    WrongPayerAuthority,
-    #[msg("Payment and revenue destination mints differ")]
-    MintMismatch,
-    #[msg("Payer source must be the canonical SPL ATA")]
-    NonCanonicalPayerSource,
-    #[msg("Revenue destination must be the canonical adapter authority ATA")]
-    NonCanonicalRevenueDestination,
-    #[msg("Payer has insufficient stablecoin balance")]
-    InsufficientPaymentBalance,
+    #[msg("Revenue source must be the canonical adapter authority ATA")]
+    NonCanonicalRevenueSource,
+    #[msg("Revenue source is not sufficiently funded before accounting")]
+    InsufficientFunding,
 }
