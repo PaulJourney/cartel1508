@@ -47,11 +47,11 @@ jobs:
         shell: bash
         run: |
           cp /tmp/qualified-revenue-e2e-tail.log QUALIFIED_REVENUE_E2E_FAILURE.log
+          git checkout -- integration-tests/Cargo.lock || true
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -f QUALIFIED_REVENUE_E2E_FAILURE.log
           git commit -m 'capture qualified revenue E2E failure diagnostic'
-          git pull --rebase origin agent/revenue-qualification-e2e
           git push origin HEAD:agent/revenue-qualification-e2e
       - name: Fail after preserving diagnostic
         if: steps.e2e.outputs.status != '0'
@@ -64,5 +64,4 @@ jobs:
           git add integration-tests/Cargo.lock
           git rm .github/workflows/revenue-qualification-e2e-lock-sync.yml
           git commit -m 'lock qualified revenue E2E dependencies'
-          git pull --rebase origin agent/revenue-qualification-e2e
           git push origin HEAD:agent/revenue-qualification-e2e
