@@ -10,6 +10,8 @@ anchor-litesvm = "=0.4.0"
 litesvm-utils = "=0.4.0"
 service_referral_protocol = { path = "../programs/service_referral_protocol", features = ["no-entrypoint"] }
 revenue_adapter = { path = "../programs/revenue_adapter", features = ["no-entrypoint"] }
+revenue_qualification = { path = "../programs/revenue_qualification", features = ["no-entrypoint"] }
+test_revenue_evidence_stub = { path = "fixtures/evidence_stub", features = ["no-entrypoint"] }
 solana-signer = "=3.0.1"
 solana-transaction = { version = "=3.0.1", features = ["bincode"] }
 spl-token = "=9.0.0"
