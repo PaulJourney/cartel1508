@@ -5,10 +5,12 @@ skip-lint = false
 [programs.localnet]
 service_referral_protocol = "4AuoBkj4vkH2K1jwUuECtVBqF6Q74efjGbaw7btuNjRV"
 revenue_adapter = "EmGJDPvwSx6kU4KijWGh8uqRNj3BJXNjcWQyCmfKv7WL"
+revenue_qualification = "6WWnYWwsuYNPDruPJEsqJKekv9mN9NP2mCEU6XJ7qfWs"
 
 [programs.devnet]
 service_referral_protocol = "4AuoBkj4vkH2K1jwUuECtVBqF6Q74efjGbaw7btuNjRV"
 revenue_adapter = "EmGJDPvwSx6kU4KijWGh8uqRNj3BJXNjcWQyCmfKv7WL"
+revenue_qualification = "6WWnYWwsuYNPDruPJEsqJKekv9mN9NP2mCEU6XJ7qfWs"
 
 [provider]
 cluster = "localnet"
