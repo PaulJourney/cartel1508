@@ -29,7 +29,7 @@ jobs:
         run: |
           mkdir -p target/deploy
           cd integration-tests/fixtures/evidence_stub
-          cargo build-sbf --locked --sbf-out-dir ../../../target/deploy
+          cargo build-sbf --sbf-out-dir ../../../target/deploy -- --locked
           test -s ../../../target/deploy/test_revenue_evidence_stub.so
       - name: Commit fixture lock and remove bootstrap workflow
         run: |
