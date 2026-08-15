@@ -38,24 +38,31 @@ jobs:
           set +e
           RUST_BACKTRACE=1 cargo test --locked --manifest-path integration-tests/Cargo.toml --test qualified_revenue_e2e -- --nocapture > /tmp/qualified-revenue-e2e.log 2>&1
           status=$?
-          tail -n 220 /tmp/qualified-revenue-e2e.log
-          exit $status
-      - name: Preserve compact E2E failure diagnostic
-        if: failure() && steps.e2e.outcome == 'failure'
+          tail -n 220 /tmp/qualified-revenue-e2e.log > /tmp/qualified-revenue-e2e-tail.log
+          cat /tmp/qualified-revenue-e2e-tail.log
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Persist compact E2E failure diagnostic
+        if: steps.e2e.outputs.status != '0'
         shell: bash
         run: |
-          tail -n 220 /tmp/qualified-revenue-e2e.log > QUALIFIED_REVENUE_E2E_FAILURE.log
+          cp /tmp/qualified-revenue-e2e-tail.log QUALIFIED_REVENUE_E2E_FAILURE.log
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add QUALIFIED_REVENUE_E2E_FAILURE.log integration-tests/Cargo.lock
+          git add -f QUALIFIED_REVENUE_E2E_FAILURE.log
           git commit -m 'capture qualified revenue E2E failure diagnostic'
+          git pull --rebase origin agent/revenue-qualification-e2e
           git push origin HEAD:agent/revenue-qualification-e2e
+      - name: Fail after preserving diagnostic
+        if: steps.e2e.outputs.status != '0'
+        run: exit 1
       - name: Commit integration lock and remove temporary workflow
-        if: success()
+        if: steps.e2e.outputs.status == '0'
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add integration-tests/Cargo.lock
           git rm .github/workflows/revenue-qualification-e2e-lock-sync.yml
           git commit -m 'lock qualified revenue E2E dependencies'
+          git pull --rebase origin agent/revenue-qualification-e2e
           git push origin HEAD:agent/revenue-qualification-e2e
