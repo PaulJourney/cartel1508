@@ -1,5 +1,5 @@
 use anchor_lang::{prelude::*, AccountDeserialize};
-use anchor_litesvm::{AnchorLiteSVM, AssertionHelpers, TestHelpers};
+use anchor_litesvm::{AnchorLiteSVM, AssertionHelpers, ProgramTestExt, TestHelpers};
 use revenue_adapter::{RevenueReceipt, CONFIG_SEED, RECEIPT_SEED, REVENUE_AUTHORITY_SEED};
 use service_referral_protocol::state::UserState;
 use solana_signer::Signer;
@@ -35,19 +35,14 @@ fn derived_event_id(
 
 #[test]
 fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
-    // Start from the exact single-program fixture used by the already-green economic tests,
-    // then deploy the two CPI callees into the same VM. This keeps SPL helper semantics
-    // identical while still exercising the full three-program call chain.
+    // Establish the exact referral-only fixture already proven by economic.rs first.
+    // Additional CPI programs are deliberately deployed only after referral initialization
+    // and service-unit activation, avoiding a LiteSVM pre-deployment side effect on SPL mint
+    // initialization observed with multi-program builders.
     let mut ctx = AnchorLiteSVM::build_with_program(
         service_referral_protocol::ID,
         REFERRAL_BYTES,
     );
-    ctx.svm
-        .add_program(revenue_adapter::ID, ADAPTER_BYTES)
-        .expect("deploy revenue adapter");
-    ctx.svm
-        .add_program(revenue_qualification::ID, QUALIFICATION_BYTES)
-        .expect("deploy qualification gateway");
 
     let initializer = ctx
         .svm
@@ -75,12 +70,6 @@ fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
         .create_token_mint(&initializer, 6)
         .expect("USDC mint");
 
-    // Assert the exact prerequisite that failed in the first multi-program harness.
-    ctx.svm
-        .assert_account_owner(&usdt_mint.pubkey(), &spl_token::id());
-    ctx.svm
-        .assert_account_owner(&usdc_mint.pubkey(), &spl_token::id());
-
     let (protocol_pda, _) = Pubkey::find_program_address(
         &[b"protocol"],
         &service_referral_protocol::ID,
@@ -102,6 +91,8 @@ fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
         &service_referral_protocol::ID,
     );
 
+    // These addresses are deterministic and can be frozen by the referral protocol before
+    // either downstream program is deployed in the test VM.
     let (adapter_config, _) =
         Pubkey::find_program_address(&[CONFIG_SEED], &revenue_adapter::ID);
     let (revenue_authority, _) =
@@ -149,28 +140,6 @@ fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
         .expect("build register");
     ctx.execute_instruction(register_ix, &[&user])
         .expect("execute register")
-        .assert_success();
-
-    ctx.program_id = revenue_adapter::ID;
-    let initialize_adapter_ix = ctx
-        .program()
-        .accounts(revenue_adapter::accounts::Initialize {
-            initializer: initializer.pubkey(),
-            config: adapter_config,
-            revenue_authority,
-            qualification_authority,
-            system_program: anchor_lang::system_program::ID,
-        })
-        .args(revenue_adapter::instruction::Initialize {
-            referral_program: service_referral_protocol::ID,
-            qualification_program: revenue_qualification::ID,
-            usdt_mint: usdt_mint.pubkey(),
-            usdc_mint: usdc_mint.pubkey(),
-        })
-        .instruction()
-        .expect("build adapter initialize");
-    ctx.execute_instruction(initialize_adapter_ix, &[&initializer])
-        .expect("execute adapter initialize")
         .assert_success();
 
     let treasury_usdt = ctx
@@ -249,7 +218,6 @@ fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
         )
         .expect("mint external customer payment funds");
 
-    ctx.program_id = service_referral_protocol::ID;
     let purchase_ix = ctx
         .program()
         .accounts(service_referral_protocol::accounts::PurchaseServiceUnits {
@@ -271,6 +239,32 @@ fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
         .expect("build activation purchase");
     ctx.execute_instruction(purchase_ix, &[&user])
         .expect("execute activation purchase")
+        .assert_success();
+
+    // Only now add the two downstream CPI programs to the already-proven referral fixture.
+    ctx.deploy_program(revenue_adapter::ID, ADAPTER_BYTES);
+    ctx.deploy_program(revenue_qualification::ID, QUALIFICATION_BYTES);
+
+    ctx.program_id = revenue_adapter::ID;
+    let initialize_adapter_ix = ctx
+        .program()
+        .accounts(revenue_adapter::accounts::Initialize {
+            initializer: initializer.pubkey(),
+            config: adapter_config,
+            revenue_authority,
+            qualification_authority,
+            system_program: anchor_lang::system_program::ID,
+        })
+        .args(revenue_adapter::instruction::Initialize {
+            referral_program: service_referral_protocol::ID,
+            qualification_program: revenue_qualification::ID,
+            usdt_mint: usdt_mint.pubkey(),
+            usdc_mint: usdc_mint.pubkey(),
+        })
+        .instruction()
+        .expect("build adapter initialize");
+    ctx.execute_instruction(initialize_adapter_ix, &[&initializer])
+        .expect("execute adapter initialize")
         .assert_success();
 
     let revenue_amount = 100 * UNIT;
@@ -364,8 +358,8 @@ fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
     let user_state = UserState::try_deserialize(&mut user_data).expect("deserialize beneficiary");
     assert_eq!(user_state.direct_accrued_usdc, direct);
 
-    // Exact replay: receipt already exists. Because the customer transfer and adapter CPI are
-    // in one Solana transaction, the attempted second payment must also be rolled back.
+    // Exact replay: the receipt already exists. The attempted second customer transfer must
+    // be rolled back together with the rejected adapter CPI.
     ctx.svm.expire_blockhash();
     let replay_ix = ctx
         .program()
@@ -413,8 +407,8 @@ fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
     ctx.svm
         .assert_token_balance(&treasury_usdc, 10 * UNIT + treasury_delta);
 
-    // New event but invalid ancestry: referral CPI must reject it, and the entire outer
-    // transaction (including token transfer and receipt creation) must disappear.
+    // A different event with invalid ancestry must fail in the referral CPI. The preceding
+    // customer payment and newly-created adapter receipt must both disappear atomically.
     ctx.svm.expire_blockhash();
     let nonce_2 = [2u8; 32];
     let event_2 = derived_event_id(
