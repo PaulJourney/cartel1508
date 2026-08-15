@@ -28,6 +28,7 @@ Status: **pre-audit**. This document defines the complete independent review tar
 - root `Cargo.lock`
 - `Anchor.toml`
 - `integration-tests/Cargo.toml`
+- `integration-tests/Cargo.lock`
 - `integration-tests/tests/**`
 - `tests/reference-model.mjs`
 - `scripts/static-gates.py`
@@ -42,7 +43,9 @@ Status: **pre-audit**. This document defines the complete independent review tar
 - `QUALIFIED_REVENUE_SOURCE_SPEC.md`
 - `PROGRAM_ID_CUSTODY_RUNBOOK.md`
 - `MAINNET_FINALIZATION_RUNBOOK.md`
+- `MAINNET_SMOKE_PLAN.md`
 - `PRE_MAINNET_REVIEW.md`
+- `AUDIT_HANDOFF.md`
 
 The audit should treat the three programs as **one economic and authorization system**. A finding may cross program boundaries even when each individual instruction appears locally correct.
 
@@ -80,11 +83,13 @@ The audit should treat the three programs as **one economic and authorization sy
 - Payer must sign and own the payment source token account.
 - Supported mint must match the immutable adapter configuration.
 - Destination must be the canonical Revenue Authority ATA.
+- Canonical `AdapterConfig` PDA is independently re-derived, not merely accepted by owner/discriminator.
+- Adapter executable identity is fixed and executable.
+- Referral executable identity must match the referral Program ID frozen in AdapterConfig before token movement.
 - Real SPL value transfer occurs before the adapter CPI and is rolled back if any later CPI fails.
 - Qualification Authority is a deterministic PDA with no private key and has a narrowly scoped signing purpose.
 - Event identity deterministically binds payer, beneficiary, mint, amount and client nonce.
 - The expected adapter receipt PDA is recomputed from the derived event identity.
-- Adapter account ownership and executable identity cannot be substituted.
 - A malicious caller cannot substitute referral program, protocol state, beneficiary or ancestry to redirect accounting.
 - Production feature cannot initialize/use an unfrozen adapter identity.
 - No mutable admin/config/approval function provides a hidden permanent human reward authority.
@@ -107,11 +112,13 @@ The auditor should explicitly trace one successful and multiple failing transact
 
 ### Failure paths
 
-Review that all state/token mutations roll back for at least:
+Review that all state/token mutations roll back or are rejected before value movement for at least:
 
 - exact event replay;
 - wrong Qualification Authority;
-- wrong adapter/referral executable;
+- non-canonical AdapterConfig;
+- wrong adapter executable;
+- executable referral substitution;
 - wrong Revenue Authority or non-canonical ATA;
 - unsupported mint or mint mismatch;
 - insufficient payer/source funding;
@@ -142,10 +149,11 @@ A generic rule of “any wallet may pay X stablecoins and nominate beneficiary Y
 - Adapter production bindings must exactly equal final referral + qualification Program IDs.
 - Qualification production binding must exactly equal final adapter Program ID.
 - Final adapter `RevenueAuthority` PDA must exactly equal core `MAINNET_QUALIFIED_REVENUE_SOURCE`.
+- Final Qualification Authority PDA must be derived from the final qualification Program ID and recorded in the release manifest.
 - `[programs.mainnet]` must contain all three exact identities.
 - Release manifest must match the exact git commit and frozen source constants.
 - Release manifest must contain SHA-256 values for all three exact production `.so` artifacts.
-- `scripts/pre-mainnet-gate.py` should prefer Docker/verifiable artifacts and fail closed when any identity, artifact, audit evidence, qualification-evidence hash or smoke approval is missing/mismatched.
+- `scripts/pre-mainnet-gate.py` must independently derive both authority PDAs, self-test that derivation against real-validator vectors, prefer Docker/verifiable artifacts and fail closed when any identity, artifact, audit evidence, qualification-evidence hash or smoke approval is missing/mismatched.
 - `qualification_evidence_spec_sha256` must match the reviewed repository specification.
 - `audit_report_sha256` must identify the exact independent report covering this exact release chain.
 - Secret-like Program ID/deployer material must never be committed.
@@ -169,20 +177,39 @@ A generic rule of “any wallet may pay X stablecoins and nominate beneficiary Y
 - Reference-model and deterministic accounting/property tests cover exact conservation and global Unit ID invariants.
 - LiteSVM tests cover initialization, service-unit purchases, source authorization, ancestry validation, network routing, claim lifecycle, grace/expiry and Unit IDs.
 - Previous production-equivalent devnet core smoke passed initialize, Pioneer #1 registration, 10-unit purchase, separately funded qualified revenue, 50/43/2/5 accounting and ACTIVE claim.
-- Prior core devnet smoke conserved exactly 20 test tokens: `5.002` to user, `14.998` to treasury and `0` in reward vault after claim.
 
-### Three-program trust-chain evidence
+### Three-program hardened runtime evidence
 
-- All three programs compile together under the pinned locked workspace dependency graph.
-- Permanent three-program CI run `31900218190` completed successfully after the qualification program was added to the workspace/build graph.
-- Real isolated `solana-test-validator` end-to-end Actions run `31899960367` completed successfully.
-- Evidence artifact: `qualification-localnet-smoke-evidence`, artifact ID `9250852374`, archive SHA-256 `4ed7d16bc13f036f5194195d48c7fe87fdc8ae0f0919a255ea27a1ecdf1f2f48`.
-- That run generated ephemeral test-only identities, built/deployed all three `.so` artifacts and executed real transactions.
-- It proved successful payer-funded qualification, exact replay rejection, downstream ancestry-failure rollback including receipt rollback, and final claim.
-- It conserved exactly 310 test USDC: `50.02` final user/Pioneer, `200` customer remainder, `59.98` service treasury, `0` referral reward vault and `0` adapter Revenue Authority ATA.
-- The full qualification runtime e2e gate is intentionally enforced on real `solana-test-validator`; a known LiteSVM multi-program SPL-mint fixture anomaly is retained as a compiled diagnostic test but excluded from authoritative runtime gating.
+- `revenue-adapter-ci` run `31900961243` — **SUCCESS** for locked graph, Rust tests, three Anchor builds, production graph and artifact hashing.
+- Real isolated `solana-test-validator` Actions run `31901949687` — **SUCCESS**.
+- Evidence artifact: `qualification-localnet-smoke-evidence`, artifact ID `9251370786`, digest `sha256:5d27d17094deba2f136637986da4c3fd4e88ad52c5aee4e7860524185b95d6a2`.
+- The validator workflow proves payer-funded qualification, exact replay rejection, **referral executable substitution rejection before token movement**, downstream ancestry-failure rollback including receipt rollback, ACTIVE claim and exact 310-USDC conservation.
+- The runtime workflow asserts that substitution leaves customer, treasury, reward vault and Revenue Authority balances unchanged and creates no receipt.
 
-The final audit handoff must additionally include the most recent green RustSec, protocol-CI and Docker-verifiable run IDs/artifact hashes after the current release-engineering changes finish executing. Do not substitute an older green run for final release evidence after a relevant source/build change.
+### Full protocol CI and separate integration lock
+
+- Protocol CI run `31901867138` — **SUCCESS**.
+- Artifact `anchor-build-three-program-locked-production`, ID `9251365430`, digest `sha256:43b72fa42bc27222f019de4804593113c62077c9efe1e1e484d106c4074a4826`.
+- It passed the reference model, extended static gates, explicit PDA derivation self-test, expected fail-closed release gate, production graph, all three builds, Rust tests, complete LiteSVM target compilation with the synchronized integration lock, permitted LiteSVM runtime tests, production build/hashing and artifact upload.
+- `integration-tests/Cargo.lock` was regenerated with pinned Solana `3.1.10` / Anchor `1.1.2`; sync run `31901550667` compiled all integration targets under `--locked` before committing the lockfile.
+- Full qualification runtime e2e remains authoritative on real `solana-test-validator`; the known LiteSVM multi-program SPL-mint fixture anomaly remains a compiled diagnostic but is excluded from authoritative full-runtime gating.
+
+### Docker verifiable evidence
+
+- Docker/verifiable run `31901171318` — **SUCCESS**.
+- Artifact `anchor-verifiable-three-program-production`, ID `9251212906`, digest `sha256:572dfa7139ffa300fa7f0a980926704570eb43d70a8bfc6369a3063dbeaa5824`.
+- Development artifact hashes:
+  - referral `b257f3d588cec850b124a6b737e2d43032f0c292d8be06c4743722de76450194`
+  - adapter `cfe900e16f1b114c00d9121505f4625392380f97c84bcf362982055e8843dba8`
+  - qualification `aaa3a0a27f81c100109e2140e9f07b26e12aee2a61269e79bea84d6e33ad68cc`
+- These are development evidence only and must be rebuilt after final Program IDs/evidence/timestamp are frozen.
+
+### Dependency security
+
+- RustSec run `31900619980` — **SUCCESS**.
+- Evidence artifact ID `9251007681`.
+- 0 known vulnerabilities in the production dependency graph.
+- Informational only: transitive `bincode 1.3.3` is marked unmaintained; it is not reported as a known vulnerability by this scan.
 
 ## Explicit mainnet blockers
 
@@ -193,11 +220,11 @@ The final audit handoff must additionally include the most recent green RustSec,
 - Final registration opening UTC.
 - Exact `[programs.mainnet]` entries.
 - Independent third-party audit of the exact final three-program commit and disposition of findings.
-- Final locked + Docker-verifiable build after every immutable value/evidence rule is frozen.
-- Completed `release/mainnet-release.json` with three artifact hashes, audit hash and qualification-evidence-spec hash.
+- Final locked + real-validator + RustSec + Docker-verifiable evidence after every immutable value/evidence rule is frozen.
+- Completed `release/mainnet-release.json` with three artifact hashes, both authority PDAs, audit hash and qualification-evidence-spec hash.
 - `python3 scripts/pre-mainnet-gate.py` returns `READY FOR CONTROLLED MAINNET DEPLOYMENT`.
 - Controlled mainnet deployment and bytecode verification for all three programs.
-- Limited mainnet smoke before permanent authority removal.
+- Limited approved mainnet smoke before permanent authority removal.
 
 ## Out of scope unless explicitly added by the final engagement
 
