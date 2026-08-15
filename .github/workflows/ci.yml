@@ -1,4 +1,5 @@
 name: protocol-ci
+# Revalidated after synchronizing integration-tests/Cargo.lock with revenue_qualification.
 on:
   push:
     branches: [agent/revenue-adapter-v0.1]
