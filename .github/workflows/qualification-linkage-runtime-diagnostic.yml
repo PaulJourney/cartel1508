@@ -1,0 +1,54 @@
+name: qualification-linkage-runtime-diagnostic
+on:
+  push:
+    branches: [agent/revenue-adapter-v0.1]
+    paths:
+      - '.github/workflows/qualification-linkage-runtime-diagnostic.yml'
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/revenue-adapter-v0.1
+      - uses: solana-foundation/github-actions/setup-all@v0.2.15
+        with:
+          solana_version: '3.1.10'
+          anchor_version: '1.1.2'
+          node_version: '24'
+      - run: cargo-build-sbf --install-only
+      - name: Align evidence API and instrument target mint state
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('integration-tests/tests/qualification_e2e.rs')
+          r = p.read_text()
+          r = r.replace('    nonce: [u8; 32],', '    evidence_hash: [u8; 32],')
+          old = '''        &[\n            revenue_qualification::EVENT_DOMAIN,\n            payer.as_ref(),\n            beneficiary.as_ref(),\n            mint.as_ref(),\n            &amount_bytes,\n            &nonce,\n        ],'''
+          new = '''        &[\n            revenue_qualification::EVENT_DOMAIN,\n            evidence_hash.as_ref(),\n            payer.as_ref(),\n            beneficiary.as_ref(),\n            mint.as_ref(),\n            &amount_bytes,\n        ],'''
+          if old not in r:
+              raise SystemExit('old event seed layout missing')
+          r = r.replace(old, new, 1)
+          r = r.replace('nonce_1', 'evidence_hash_1').replace('nonce_2', 'evidence_hash_2')
+          r = r.replace('client_nonce:', 'evidence_hash:')
+
+          anchor = '''    let registration_open_at = ctx.svm.get_sysvar::<Clock>().unix_timestamp;\n'''
+          probe = '''    for (label, mint_key) in [("usdt", usdt_mint.pubkey()), ("usdc", usdc_mint.pubkey())] {\n        let account = ctx.svm.get_account(&mint_key).expect("mint must exist before Initialize");\n        eprintln!("TARGET_MINT {label} key={mint_key} owner={} len={} lamports={}", account.owner, account.data.len(), account.lamports);\n        assert_eq!(account.owner, spl_token::id(), "target mint owner must be legacy SPL Token");\n        assert_eq!(account.data.len(), 82, "target mint must have canonical Mint length");\n    }\n\n''' + anchor
+          if 'TARGET_MINT' not in r:
+              if anchor not in r:
+                  raise SystemExit('registration anchor missing')
+              r = r.replace(anchor, probe, 1)
+          p.write_text(r)
+          PY
+      - name: Build programs and integration binaries
+        run: |
+          anchor build --ignore-keys
+          cargo test --locked --manifest-path integration-tests/Cargo.toml --all-targets --no-run
+      - name: Bootstrap probe without downstream host linkage
+        run: cargo test --locked --manifest-path integration-tests/Cargo.toml --test qualification_bootstrap_probe -- --nocapture
+      - name: Bootstrap probe with downstream host linkage
+        run: cargo test --locked --manifest-path integration-tests/Cargo.toml --test qualification_linkage_probe -- --nocapture
+      - name: Instrumented full E2E target
+        run: cargo test --locked --manifest-path integration-tests/Cargo.toml --test qualification_e2e -- --nocapture
