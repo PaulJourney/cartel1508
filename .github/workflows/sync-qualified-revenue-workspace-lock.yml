@@ -1,0 +1,35 @@
+name: sync-qualified-revenue-workspace-lock
+on:
+  push:
+    branches: [agent/revenue-qualification-e2e]
+concurrency:
+  group: sync-qualified-revenue-workspace-lock
+  cancel-in-progress: true
+permissions:
+  contents: write
+jobs:
+  sync-lock:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/revenue-qualification-e2e
+      - uses: solana-foundation/github-actions/setup-all@v0.2.15
+        with:
+          solana_version: '3.1.10'
+          anchor_version: '1.1.2'
+          node_version: '24'
+      - run: cargo-build-sbf --install-only
+      - name: Regenerate and verify workspace lock
+        run: |
+          cargo generate-lockfile
+          cargo check --workspace --locked
+      - name: Commit workspace lock and remove one-shot workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Cargo.lock
+          git rm .github/workflows/sync-qualified-revenue-workspace-lock.yml
+          git commit -m 'sync qualified revenue workspace lock'
+          git push origin HEAD:agent/revenue-qualification-e2e
