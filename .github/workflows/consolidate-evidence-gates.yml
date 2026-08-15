@@ -54,23 +54,6 @@ jobs:
           r = r.replace('client_nonce:', 'evidence_hash:')
           if 'client_nonce:' in r or 'nonce_1' in r or 'nonce_2' in r or '&nonce' in r:
               raise SystemExit('stale nonce API remains in qualification_e2e.rs')
-
-          # Canonicalize the two legacy SPL Mint accounts with spl-token's own Pack
-          # implementation. This makes the fixture byte-identical to what Anchor's
-          # Account<Mint> deserializer expects, instead of inferring offsets manually.
-          import_anchor = 'use solana_transaction::Transaction;\n'
-          pack_imports = '''use spl_token::solana_program::program_option::COption;\nuse spl_token::solana_program::program_pack::Pack;\n'''
-          if pack_imports not in r:
-              if import_anchor not in r:
-                  raise SystemExit('E2E import anchor not found')
-              r = r.replace(import_anchor, import_anchor + pack_imports, 1)
-
-          mint_anchor = '''    let usdc_mint = ctx\n        .svm\n        .create_token_mint(&initializer, 6)\n        .expect("USDC mint");\n'''
-          canonical_guard = mint_anchor + '''\n    for mint_key in [usdt_mint.pubkey(), usdc_mint.pubkey()] {\n        let mut mint_account = ctx.svm.get_account(&mint_key).expect("mint account exists");\n        let canonical_mint = spl_token::state::Mint {\n            mint_authority: COption::Some(initializer.pubkey()),\n            supply: 0,\n            decimals: 6,\n            is_initialized: true,\n            freeze_authority: COption::None,\n        };\n        let mut packed = vec![0u8; spl_token::state::Mint::LEN];\n        spl_token::state::Mint::pack(canonical_mint, &mut packed)\n            .expect("pack canonical SPL Mint");\n        mint_account.owner = spl_token::id();\n        mint_account.data = packed;\n        ctx.svm\n            .set_account(mint_key, mint_account)\n            .expect("set canonical SPL Mint account");\n\n        let verified_account = ctx.svm.get_account(&mint_key).expect("canonical mint exists");\n        let verified_mint = spl_token::state::Mint::unpack(&verified_account.data)\n            .expect("canonical SPL Mint must unpack as initialized");\n        assert!(verified_mint.is_initialized);\n        assert_eq!(verified_mint.decimals, 6);\n        assert_eq!(verified_mint.mint_authority, COption::Some(initializer.pubkey()));\n    }\n'''
-          if 'canonical SPL Mint must unpack as initialized' not in r:
-              if mint_anchor not in r:
-                  raise SystemExit('E2E mint setup anchor not found')
-              r = r.replace(mint_anchor, canonical_guard, 1)
           e2e.write_text(r)
 
           static = Path('scripts/static-gates.py')
@@ -83,11 +66,7 @@ jobs:
           if 'core production adapter binding constant exists' not in g:
               if marker not in g:
                   raise SystemExit('static gate insertion marker not found')
-              g = g.replace(
-                  marker,
-                  "    'core production adapter binding constant exists': 'MAINNET_REVENUE_ADAPTER_PROGRAM' in constants,\n" + marker,
-                  1,
-              )
+              g = g.replace(marker, "    'core production adapter binding constant exists': 'MAINNET_REVENUE_ADAPTER_PROGRAM' in constants,\n" + marker, 1)
           if 'amount nonce' in g or '&client_nonce' in g:
               raise SystemExit('stale nonce static gate remains')
           static.write_text(g)
@@ -97,10 +76,7 @@ jobs:
           import_line = 'from qualification_release_gate import evaluate as evaluate_qualification_release\n'
           if import_line not in p:
               p = p.replace('from pathlib import Path\n', 'from pathlib import Path\n\n' + import_line, 1)
-          p = p.replace(
-              'QUALIFICATION_SPEC = ROOT / "QUALIFIED_REVENUE_SOURCE_SPEC.md"',
-              'QUALIFICATION_SPEC = ROOT / "QUALIFIED_REVENUE_QUALIFICATION_SPEC.md"',
-          )
+          p = p.replace('QUALIFICATION_SPEC = ROOT / "QUALIFIED_REVENUE_SOURCE_SPEC.md"', 'QUALIFICATION_SPEC = ROOT / "QUALIFIED_REVENUE_QUALIFICATION_SPEC.md"')
           main_marker = '    blockers: list[str] = []\n    notes: list[str] = []\n'
           eval_block = '''    qualification_blockers, qualification_notes = evaluate_qualification_release(ROOT)\n    blockers.extend(qualification_blockers)\n    notes.extend(qualification_notes)\n'''
           if eval_block not in p:
@@ -116,6 +92,9 @@ jobs:
           anchor build --ignore-keys
           cargo test --locked --workspace
           cargo test --locked --manifest-path integration-tests/Cargo.toml --all-targets --no-run
+          echo '=== CONTROL: proven referral-only economic runtime ==='
+          cargo test --locked --manifest-path integration-tests/Cargo.toml --test economic -- --nocapture
+          echo '=== TARGET: three-program qualification runtime ==='
           cargo test --locked --manifest-path integration-tests/Cargo.toml --test qualification_e2e -- --nocapture
           python3 scripts/static-gates.py
           set +e
