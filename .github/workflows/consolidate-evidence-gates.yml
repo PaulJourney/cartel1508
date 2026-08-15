@@ -21,26 +21,16 @@ jobs:
           node_version: '24'
       - run: cargo-build-sbf --install-only
 
-      - name: Consolidate evidence-bound callers and release gates
+      - name: Apply verified E2E harness and evidence API migration
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
-          smoke = Path('scripts/qualification-localnet-smoke.mjs')
-          s = smoke.read_text()
-          s = s.replace(
-              'function eventId(qualificationProgramId, payer, beneficiary, mint, amount, nonce) {',
-              'function eventId(qualificationProgramId, payer, beneficiary, mint, amount, evidenceHash) {'
-          )
-          s = s.replace(
-              '[EVENT_DOMAIN, payer.toBuffer(), beneficiary.toBuffer(), mint.toBuffer(), u64le(amount), nonce]',
-              '[EVENT_DOMAIN, evidenceHash, payer.toBuffer(), beneficiary.toBuffer(), mint.toBuffer(), u64le(amount)]'
-          )
-          s = s.replace('nonce1', 'evidenceHash1')
-          s = s.replace('nonce2', 'evidenceHash2')
-          s = s.replace('nonce3', 'evidenceHash3')
-          smoke.write_text(s)
-
+          # --- LiteSVM E2E harness ---
+          # The verified harness keeps only the referral BPF image embedded at host compile
+          # time, then loads Adapter/Qualification after referral bootstrap. It also uses
+          # explicit Program builders because mutating AnchorContext.program_id does not
+          # retarget AnchorContext.program().
           e2e = Path('integration-tests/tests/qualification_e2e.rs')
           r = e2e.read_text()
           r = r.replace('    nonce: [u8; 32],', '    evidence_hash: [u8; 32],')
@@ -52,31 +42,100 @@ jobs:
           r = r.replace('nonce_1', 'evidence_hash_1')
           r = r.replace('nonce_2', 'evidence_hash_2')
           r = r.replace('client_nonce:', 'evidence_hash:')
-          if 'client_nonce:' in r or 'nonce_1' in r or 'nonce_2' in r or '&nonce' in r:
-              raise SystemExit('stale nonce API remains in qualification_e2e.rs')
+          r = r.replace(
+              'use anchor_litesvm::{AnchorLiteSVM, AssertionHelpers, ProgramTestExt, TestHelpers};',
+              'use anchor_litesvm::{AnchorLiteSVM, AssertionHelpers, Program, ProgramTestExt, TestHelpers};',
+          )
+          r = r.replace(
+              'const ADAPTER_BYTES: &[u8] = include_bytes!("../../target/deploy/revenue_adapter.so");\n',
+              '',
+          )
+          r = r.replace(
+              'const QUALIFICATION_BYTES: &[u8] = include_bytes!("../../target/deploy/revenue_qualification.so");\n',
+              '',
+          )
+          old_deploy = '''    // Only now add the two downstream CPI programs to the already-proven referral fixture.\n    ctx.deploy_program(revenue_adapter::ID, ADAPTER_BYTES);\n    ctx.deploy_program(revenue_qualification::ID, QUALIFICATION_BYTES);\n\n    ctx.program_id = revenue_adapter::ID;\n    let initialize_adapter_ix = ctx\n        .program()\n'''
+          new_deploy = '''    // Only now add the two downstream CPI programs to the already-proven referral fixture.\n    // Cargo runs this integration test with integration-tests as the current directory.\n    let adapter_bytes = std::fs::read("../target/deploy/revenue_adapter.so")\n        .expect("read revenue adapter BPF image");\n    let qualification_bytes = std::fs::read("../target/deploy/revenue_qualification.so")\n        .expect("read revenue qualification BPF image");\n    ctx.deploy_program(revenue_adapter::ID, &adapter_bytes);\n    ctx.deploy_program(revenue_qualification::ID, &qualification_bytes);\n\n    let adapter_program = Program::new(revenue_adapter::ID);\n    let qualification_program = Program::new(revenue_qualification::ID);\n\n    let initialize_adapter_ix = adapter_program\n'''
+          if old_deploy not in r:
+              raise SystemExit('old E2E downstream deployment/builder block not found')
+          r = r.replace(old_deploy, new_deploy, 1)
+          qualification_switch = '    ctx.program_id = revenue_qualification::ID;\n'
+          if qualification_switch not in r:
+              raise SystemExit('old E2E qualification program switch not found')
+          r = r.replace(qualification_switch, '', 1)
+          split_token = '    let evidence_hash_1 = [1u8; 32];'
+          if split_token not in r:
+              raise SystemExit('E2E first evidence marker not found')
+          before, after = r.split(split_token, 1)
+          after = after.replace('ctx\n        .program()', 'qualification_program')
+          r = before + split_token + after
+          receipt_marker = '    assert_eq!(receipt.event_id, event_1);\n'
+          evidence_assert = receipt_marker + '    assert_eq!(receipt.evidence_hash, evidence_hash_1);\n'
+          if 'receipt.evidence_hash' not in r:
+              if receipt_marker not in r:
+                  raise SystemExit('receipt event assertion marker not found')
+              r = r.replace(receipt_marker, evidence_assert, 1)
+          stale = ['client_nonce:', 'nonce_1', 'nonce_2', '&nonce', 'ctx.program_id =', 'ADAPTER_BYTES', 'QUALIFICATION_BYTES']
+          found = [item for item in stale if item in r]
+          if found:
+              raise SystemExit(f'stale E2E harness/API tokens remain: {found}')
           e2e.write_text(r)
 
+          # --- Local-validator smoke caller ---
+          smoke = Path('scripts/qualification-localnet-smoke.mjs')
+          s = smoke.read_text()
+          old_event_fn = 'function eventId(qualificationProgramId, payer, beneficiary, mint, amount, nonce) {'
+          new_event_fn = 'function eventId(qualificationProgramId, payer, beneficiary, mint, amount, evidenceHash) {'
+          if old_event_fn not in s:
+              raise SystemExit('old localnet eventId signature not found')
+          s = s.replace(old_event_fn, new_event_fn, 1)
+          old_event_seeds = '[EVENT_DOMAIN, payer.toBuffer(), beneficiary.toBuffer(), mint.toBuffer(), u64le(amount), nonce]'
+          new_event_seeds = '[EVENT_DOMAIN, evidenceHash, payer.toBuffer(), beneficiary.toBuffer(), mint.toBuffer(), u64le(amount)]'
+          if old_event_seeds not in s:
+              raise SystemExit('old localnet event seed order not found')
+          s = s.replace(old_event_seeds, new_event_seeds, 1)
+          s = s.replace('nonce1', 'evidenceHash1')
+          s = s.replace('nonce2', 'evidenceHash2')
+          s = s.replace('nonce3', 'evidenceHash3')
+          if 'nonce1' in s or 'nonce2' in s or 'nonce3' in s or ', nonce]' in s:
+              raise SystemExit('stale nonce identity remains in localnet smoke')
+          smoke.write_text(s)
+
+          # --- Static source invariants ---
           static = Path('scripts/static-gates.py')
           g = static.read_text()
           old_check = "    'qualification event identity binds payer beneficiary mint amount nonce': all(x in qualification for x in ['payer_key.as_ref()', 'beneficiary_key.as_ref()', 'mint.as_ref()', '&amount_bytes', '&client_nonce']),"
           new_check = "    'qualification event identity binds evidence payer beneficiary mint amount': all(x in qualification for x in ['evidence_hash.as_ref()', 'payer_key.as_ref()', 'beneficiary_key.as_ref()', 'mint.as_ref()', '&amount_bytes']),"
-          if old_check in g:
-              g = g.replace(old_check, new_check)
+          if old_check not in g:
+              raise SystemExit('old static qualification identity gate not found')
+          g = g.replace(old_check, new_check, 1)
           marker = "    'production launch source/time constants exist':"
           if 'core production adapter binding constant exists' not in g:
               if marker not in g:
-                  raise SystemExit('static gate insertion marker not found')
-              g = g.replace(marker, "    'core production adapter binding constant exists': 'MAINNET_REVENUE_ADAPTER_PROGRAM' in constants,\n" + marker, 1)
+                  raise SystemExit('static core adapter gate insertion marker not found')
+              g = g.replace(
+                  marker,
+                  "    'core production adapter binding constant exists': 'MAINNET_REVENUE_ADAPTER_PROGRAM' in constants,\n" + marker,
+                  1,
+              )
           if 'amount nonce' in g or '&client_nonce' in g:
               raise SystemExit('stale nonce static gate remains')
           static.write_text(g)
 
+          # --- Pre-mainnet release gate ---
           gate = Path('scripts/pre-mainnet-gate.py')
           p = gate.read_text()
           import_line = 'from qualification_release_gate import evaluate as evaluate_qualification_release\n'
           if import_line not in p:
-              p = p.replace('from pathlib import Path\n', 'from pathlib import Path\n\n' + import_line, 1)
-          p = p.replace('QUALIFICATION_SPEC = ROOT / "QUALIFIED_REVENUE_SOURCE_SPEC.md"', 'QUALIFICATION_SPEC = ROOT / "QUALIFIED_REVENUE_QUALIFICATION_SPEC.md"')
+              anchor = 'from pathlib import Path\n'
+              if anchor not in p:
+                  raise SystemExit('pre-mainnet import insertion marker not found')
+              p = p.replace(anchor, anchor + '\n' + import_line, 1)
+          old_spec = 'QUALIFICATION_SPEC = ROOT / "QUALIFIED_REVENUE_SOURCE_SPEC.md"'
+          new_spec = 'QUALIFICATION_SPEC = ROOT / "QUALIFIED_REVENUE_QUALIFICATION_SPEC.md"'
+          if old_spec not in p and new_spec not in p:
+              raise SystemExit('pre-mainnet qualification spec path marker not found')
+          p = p.replace(old_spec, new_spec, 1)
           main_marker = '    blockers: list[str] = []\n    notes: list[str] = []\n'
           eval_block = '''    qualification_blockers, qualification_notes = evaluate_qualification_release(ROOT)\n    blockers.extend(qualification_blockers)\n    notes.extend(qualification_notes)\n'''
           if eval_block not in p:
@@ -92,17 +151,20 @@ jobs:
           anchor build --ignore-keys
           cargo test --locked --workspace
           cargo test --locked --manifest-path integration-tests/Cargo.toml --all-targets --no-run
-          echo '=== CONTROL: proven referral-only economic runtime ==='
+          echo '=== CONTROL: referral-only economic runtime ==='
           cargo test --locked --manifest-path integration-tests/Cargo.toml --test economic -- --nocapture
-          echo '=== TARGET: three-program qualification runtime ==='
+          echo '=== E2E: qualification -> adapter -> referral ==='
           cargo test --locked --manifest-path integration-tests/Cargo.toml --test qualification_e2e -- --nocapture
+          node --check scripts/qualification-localnet-smoke.mjs
           python3 scripts/static-gates.py
+
           set +e
           python3 scripts/qualification_release_gate.py | tee /tmp/qualification-gate.txt
           qstatus=${PIPESTATUS[0]}
           python3 scripts/pre-mainnet-gate.py | tee /tmp/pre-mainnet-gate.txt
           pstatus=${PIPESTATUS[0]}
           set -e
+
           test "$qstatus" -ne 0
           test "$pstatus" -ne 0
           grep -q 'QUALIFIED_REVENUE_QUALIFICATION_SPEC.md is not FINAL' /tmp/qualification-gate.txt
@@ -110,12 +172,27 @@ jobs:
           grep -q 'PDA derivation self-test passed against real-validator vectors' /tmp/pre-mainnet-gate.txt
           grep -q 'RESULT: BLOCKED' /tmp/pre-mainnet-gate.txt
 
-      - name: Commit consolidated migration and remove temporary workflows
+      - name: Commit verified migration and remove diagnostics
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add scripts/qualification-localnet-smoke.mjs integration-tests/tests/qualification_e2e.rs scripts/static-gates.py scripts/pre-mainnet-gate.py
-          if [ -f .github/workflows/evidence-api-migration.yml ]; then git rm .github/workflows/evidence-api-migration.yml; fi
-          git rm .github/workflows/consolidate-evidence-gates.yml
-          git commit -m 'consolidate evidence-bound qualification release gates'
+          git add \
+            integration-tests/tests/qualification_e2e.rs \
+            scripts/qualification-localnet-smoke.mjs \
+            scripts/static-gates.py \
+            scripts/pre-mainnet-gate.py
+
+          for file in \
+            .github/workflows/evidence-api-migration.yml \
+            .github/workflows/qualification-binary-shape-diagnostic.yml \
+            .github/workflows/qualification-e2e-fixture-diagnostic.yml \
+            .github/workflows/qualification-e2e-harness-fix.yml \
+            .github/workflows/qualification-linkage-runtime-diagnostic.yml \
+            .github/workflows/consolidate-evidence-gates.yml
+          do
+            if [ -f "$file" ]; then git rm "$file"; fi
+          done
+
+          git diff --cached --check
+          git commit -m 'verify evidence-bound qualification E2E and release gates'
           git push origin HEAD:agent/revenue-adapter-v0.1
