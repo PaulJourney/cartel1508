@@ -1,0 +1,71 @@
+name: qualified-revenue-stack-ci
+
+on:
+  push:
+    branches:
+      - agent/revenue-qualification-e2e
+  pull_request:
+    paths:
+      - 'programs/service_referral_protocol/**'
+      - 'programs/revenue_adapter/**'
+      - 'programs/revenue_qualification/**'
+      - 'integration-tests/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Anchor.toml'
+      - '.github/workflows/qualified-revenue-stack-ci.yml'
+
+concurrency:
+  group: qualified-revenue-stack-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  locked-stack-runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: solana-foundation/github-actions/setup-all@v0.2.15
+        with:
+          solana_version: '3.1.10'
+          anchor_version: '1.1.2'
+          node_version: '24'
+      - run: cargo-build-sbf --install-only
+
+      - name: Verify locked workspace graph
+        run: cargo check --workspace --locked
+
+      - name: Run workspace Rust tests
+        run: cargo test --workspace --locked
+
+      - name: Build deployable referral / adapter / qualification programs
+        run: anchor build --ignore-keys
+
+      - name: Verify production feature graphs stay fail-closed and compilable
+        run: |
+          cargo check --locked -p service_referral_protocol --features production
+          cargo check --locked -p revenue_adapter --features production
+          cargo check --locked -p revenue_qualification --features production
+
+      - name: Build locked test-only evidence fixture
+        run: |
+          mkdir -p target/deploy
+          cd integration-tests/fixtures/evidence_stub
+          cargo build-sbf --sbf-out-dir ../../../target/deploy -- --locked
+          test -s ../../../target/deploy/test_revenue_evidence_stub.so
+
+      - name: Run complete locked LiteSVM integration suite
+        run: cargo test --locked --manifest-path integration-tests/Cargo.toml -- --nocapture
+
+      - name: Record SBF artifact hashes
+        run: |
+          test -s target/deploy/service_referral_protocol.so
+          test -s target/deploy/revenue_adapter.so
+          test -s target/deploy/revenue_qualification.so
+          sha256sum \
+            target/deploy/service_referral_protocol.so \
+            target/deploy/revenue_adapter.so \
+            target/deploy/revenue_qualification.so \
+            target/deploy/test_revenue_evidence_stub.so
