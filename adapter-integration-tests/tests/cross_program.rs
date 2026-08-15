@@ -120,6 +120,7 @@ fn verifier_pda_authorization_replay_and_downstream_rollback_hold_end_to_end() {
     let treasury = ctx.svm.create_funded_account(10_000_000_000).expect("treasury");
     let user = ctx.svm.create_funded_account(10_000_000_000).expect("user");
     let relayer = ctx.svm.create_funded_account(10_000_000_000).expect("relayer");
+    let attacker = ctx.svm.create_funded_account(10_000_000_000).expect("attacker");
 
     let usdt_mint = ctx.svm.create_token_mint(&initializer, 6).expect("USDT mint");
     let usdc_mint = ctx.svm.create_token_mint(&initializer, 6).expect("USDC mint");
@@ -335,6 +336,45 @@ fn verifier_pda_authorization_replay_and_downstream_rollback_hold_end_to_end() {
         .expect("execute unauthorized adapter tx");
     assert!(!unauthorized.is_success(), "direct adapter call must fail without verifier PDA signature");
     assert!(ctx.svm.get_account(&unauthorized_receipt).is_none());
+    ctx.svm.assert_token_balance(&revenue_usdc, 100 * UNIT);
+    ctx.svm.assert_token_balance(&vault_usdc, 0);
+    ctx.svm.assert_token_balance(&treasury_usdc, 10 * UNIT);
+
+    // A normal wallet may be a valid transaction signer, but it still cannot
+    // substitute itself for the verifier program's deterministic authority PDA.
+    let wrong_signer_event = [4u8; 32];
+    let wrong_signer_evidence = [44u8; 32];
+    let (wrong_signer_receipt, _) = Pubkey::find_program_address(
+        &[revenue_adapter::RECEIPT_SEED, wrong_signer_event.as_ref()],
+        &revenue_adapter::ID,
+    );
+    let wrong_signer_ix = anchor_ix(
+        revenue_adapter::ID,
+        adapter_accounts(
+            relayer.pubkey(),
+            config_pda,
+            attacker.pubkey(),
+            revenue_authority,
+            revenue_usdc,
+            wrong_signer_receipt,
+            protocol_pda,
+            vault_authority,
+            vault_usdc,
+            treasury_usdc,
+            user_pda,
+            technical_root,
+        ),
+        revenue_adapter::instruction::ForwardQualifiedRevenue {
+            event_id: wrong_signer_event,
+            evidence_hash: wrong_signer_evidence,
+            amount: 100 * UNIT,
+        },
+    );
+    let wrong_signer = ctx
+        .execute_instruction(wrong_signer_ix, &[&relayer, &attacker])
+        .expect("execute wrong-signer adapter tx");
+    assert!(!wrong_signer.is_success(), "ordinary signer must not substitute verifier PDA");
+    assert!(ctx.svm.get_account(&wrong_signer_receipt).is_none());
     ctx.svm.assert_token_balance(&revenue_usdc, 100 * UNIT);
     ctx.svm.assert_token_balance(&vault_usdc, 0);
     ctx.svm.assert_token_balance(&treasury_usdc, 10 * UNIT);
