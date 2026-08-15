@@ -1,4 +1,5 @@
 name: qualified-revenue-stack-ci
+# Full locked-stack verification; rerun after workspace lock synchronization.
 
 on:
   push:
