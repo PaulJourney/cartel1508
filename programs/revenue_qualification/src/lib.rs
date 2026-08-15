@@ -120,8 +120,8 @@ pub mod revenue_qualification {
     /// Consume one immutable evidence PDA and forward the already-funded event to
     /// the adapter. Direct user calls cannot satisfy the evidence-authority signer.
     /// The adapter remains the anti-replay and collateralization boundary.
-    pub fn qualify_verified_evidence<'info>(
-        ctx: Context<'_, '_, '_, 'info, QualifyVerifiedEvidence<'info>>,
+    pub fn qualify_verified_evidence(
+        ctx: Context<QualifyVerifiedEvidence>,
         event_id: [u8; 32],
         amount: u64,
     ) -> Result<()> {
