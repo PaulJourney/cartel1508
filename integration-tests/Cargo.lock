@@ -2041,6 +2041,7 @@ dependencies = [
  "anchor-litesvm",
  "litesvm-utils",
  "revenue_adapter",
+ "revenue_qualification",
  "service_referral_protocol",
  "solana-signer",
  "solana-transaction",
@@ -2221,6 +2222,15 @@ dependencies = [
  "anchor-lang",
  "anchor-spl",
  "service_referral_protocol",
+]
+
+[[package]]
+name = "revenue_qualification"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "anchor-spl",
+ "revenue_adapter",
 ]
 
 [[package]]
