@@ -1,91 +1,136 @@
-# Qualified Revenue Source — final trust model
+# Qualified Revenue Source — three-program final trust model
 
-Status: architecture freeze candidate for external review. The production source address remains intentionally unset in `constants.rs` until this dependency is implemented, audited and frozen.
+Status: the on-chain payment/adapter/referral transport is implemented and has passed a real-validator adversarial smoke test. The **business/economic evidence rule that makes a payment legitimate qualified service revenue is still intentionally unresolved and must remain a mainnet blocker** until it is concrete, non-self-generable, independently reviewed and frozen.
 
 ## Objective
 
-`record_qualified_revenue` must never depend on a permanently privileged human wallet. For an ownerless final protocol, the recommended production `qualified_revenue_source` is a deterministic PDA controlled by a separate revenue-adapter program. That PDA has no private key; the adapter program authorizes it only during CPI using its signer seeds.
+`record_qualified_revenue` must never depend on a permanently privileged human wallet and must never create referral liabilities from service-unit/activity purchases.
 
-The adapter is a distinct trust boundary from the referral protocol and must be independently audited before its PDA can be frozen into the referral program.
+The current architecture separates three responsibilities:
+
+1. `revenue_qualification`: establishes whether an event may enter the qualified-revenue path and signs with a deterministic Qualification Authority PDA;
+2. `revenue_adapter`: provides immutable anti-replay receipts and a deterministic Revenue Authority PDA that holds/funds the downstream referral CPI;
+3. `service_referral_protocol`: independently validates its immutable qualified-revenue source, takes custody of the gross stablecoin amount and applies the 50/43/2/5 accounting.
+
+The Revenue Authority PDA has no private key and is the intended final `MAINNET_QUALIFIED_REVENUE_SOURCE` after final Program IDs and evidence semantics are reviewed and frozen.
 
 ## Hard boundaries
 
 1. Service-unit purchases and activity/registration payments are not qualified revenue and must never be forwarded into `record_qualified_revenue` as the source of referral rewards.
-2. A qualified event must be separately funded before the referral program creates liabilities.
-3. The adapter source PDA must not equal the service treasury, a user wallet, the deployment wallet or any upgrade-authority wallet.
-4. The adapter must not possess a generic instruction that lets an administrator fabricate arbitrary funded reward events for arbitrary beneficiaries after finalization.
-5. USDT and USDC remain separate rails; the adapter must not perform an implicit swap or cross-token accounting substitution.
-6. Every accepted revenue event must be idempotent. Replaying the same external event must fail on-chain.
+2. Every qualified event must be separately funded before referral liabilities are created.
+3. Real token funding is necessary but **not sufficient** proof of legitimate service revenue: a participant must not be able to qualify an economic event merely by paying themselves/the system and selecting a beneficiary.
+4. No permanently privileged human key may fabricate or approve arbitrary reward events after finalization.
+5. Revenue Authority and Qualification Authority must be deterministic PDAs with no private keys.
+6. Revenue Authority must not equal the service treasury, any Program ID, user wallet, deployer or upgrade-authority wallet.
+7. USDT and USDC remain separate rails; no implicit swap/cross-token accounting substitution is permitted.
+8. Every accepted economic event must be idempotent. Replaying the same event must fail on-chain.
+9. Beneficiary, mint, amount and evidence identity must be cryptographically/deterministically bound so they cannot be substituted after qualification.
+10. Any downstream failure must roll back the payment/receipt/accounting transaction atomically.
 
-## Recommended on-chain structure
+## Implemented on-chain structure
+
+### Revenue qualification program
+
+Current implementation:
+
+- accepts a payer-signed SPL token transfer;
+- supports only mints frozen in the adapter config;
+- requires the payer token account to be owned by the payer;
+- requires the destination to be the canonical stablecoin ATA of the adapter Revenue Authority PDA;
+- derives an event identifier deterministically from payer, beneficiary, mint, amount and client nonce using Solana PDA primitives;
+- signs the CPI into the adapter only through its deterministic `qualified-revenue-authority` PDA;
+- is production fail-closed until the final adapter Program ID is frozen.
+
+This proves that actual stablecoin value moves into the qualified-revenue path and that event identity cannot be freely replaced by the caller. It does **not** yet establish that the payment corresponds to an independently legitimate service-revenue event.
 
 ### Revenue adapter program
 
-The adapter receives or verifies independently qualified service revenue according to the final product integration. Its exact qualification rules are deliberately not invented here; they depend on the real external revenue source and must be reviewed as part of the final audit.
+Implemented immutable accounts/boundaries:
 
-Recommended immutable accounts:
+- `AdapterConfig` PDA: initialize-once configuration binding referral Program ID, qualification Program ID, supported mints, Qualification Authority PDA and Revenue Authority PDA;
+- `RevenueAuthority` PDA: no private key; exact intended source frozen into core at final release;
+- canonical USDT and USDC ATAs owned by Revenue Authority;
+- one deterministic `RevenueReceipt` PDA per event ID;
+- no mutable admin/update instruction;
+- production fail-closed until final referral/qualification Program IDs are frozen.
 
-- `AdapterConfig` PDA: frozen integration identity and supported protocol Program ID.
-- `RevenueAuthority` PDA: the exact public key frozen as `MAINNET_QUALIFIED_REVENUE_SOURCE` in the referral protocol.
-- canonical USDT ATA owned by `RevenueAuthority`.
-- canonical USDC ATA owned by `RevenueAuthority`.
-- one `RevenueReceipt` PDA per unique external event identifier/hash to prevent replay.
+A successful receipt records event ID, beneficiary, mint, amount, acceptance time/slot and qualifier identity. A second initialization of the same deterministic receipt fails.
 
-### Revenue receipt
+### Referral protocol
 
-A successful event should create an immutable receipt containing at least:
+The referral protocol independently:
 
-- unique event ID or cryptographic hash;
-- beneficiary wallet/PDA;
-- stablecoin mint;
-- gross funded amount;
-- accepted-at slot/timestamp;
-- immutable reference/hash to the external qualification evidence where applicable.
+- checks that the qualified-revenue signer equals its immutable configured source;
+- transfers the gross amount from the source ATA into the protocol vault before accounting;
+- applies direct/network/Pioneer/service allocation only after collateralization;
+- routes immediately treasury-assigned components to the configured service treasury;
+- retains only claimable liabilities in the vault.
 
-Creating a second receipt with the same deterministic event ID must fail.
+## Proven atomic flow
 
-## Atomic flow
+The following path has been executed successfully on an isolated real `solana-test-validator` with all three programs built and deployed:
 
-1. Independently qualified service revenue becomes available to the adapter under the final reviewed integration rules.
-2. The adapter validates the unique event and proves that no `RevenueReceipt` exists for it.
-3. The exact stablecoin amount is available in the `RevenueAuthority` PDA's canonical token account before referral liabilities are created.
-4. The adapter creates the immutable `RevenueReceipt`.
-5. The adapter performs a CPI into `record_qualified_revenue`, passing the `RevenueAuthority` PDA as signer via PDA signer seeds.
-6. The referral program independently validates that this signer equals its immutable `qualified_revenue_source`, transfers the gross amount into its vault, and only then applies the 50/43/2/5 accounting.
-7. If any step fails, the Solana transaction rolls back atomically, including the receipt creation and token/accounting mutations.
+1. initialize referral with Revenue Authority PDA as qualified-revenue source;
+2. initialize adapter bound to referral + qualification identities;
+3. register Pioneer #1;
+4. purchase 10 service units and prove those funds route to treasury, not reward vault;
+5. payer signs a separate 100-USDC payment into Revenue Authority ATA;
+6. qualification PDA signs CPI into adapter;
+7. adapter creates the deterministic receipt and signs CPI into referral with Revenue Authority PDA;
+8. referral transfers/collateralizes the 100 USDC and applies accounting;
+9. exact replay is rejected and all token balances remain unchanged;
+10. a fresh event with deliberately invalid downstream ancestry is rejected and both the payer transfer and newly-created receipt are rolled back;
+11. ACTIVE beneficiary claims direct + Pioneer liability;
+12. all minted test USDC are conserved exactly.
 
-## Final immutability requirements
+Evidence baseline: GitHub Actions run `31899960367`, artifact ID `9250852374`. Final test balances were 50.02 USDC to the test user/Pioneer, 200 USDC remaining with the payer, 59.98 USDC treasury, 0 protocol vault and 0 Revenue Authority ATA.
 
-Before freezing the adapter PDA into the referral protocol:
+This smoke is strong evidence for **transport, collateralization, anti-replay and transaction atomicity**. It is not evidence that an external business event is economically genuine.
 
-- adapter source code and exact Program ID are final;
-- qualification logic and anti-replay semantics are covered by integration/adversarial tests;
-- adapter program has undergone independent third-party audit together with the referral protocol integration boundary;
-- adapter deployment bytecode is verified against the audited source;
-- no mutable admin/config instruction can redirect the referral Program ID, beneficiary rules or qualified-revenue semantics after final freeze;
-- if the adapter uses an upgradeable loader during smoke testing, its upgrade authority is removed only after deployed-bytecode verification and controlled mainnet smoke testing;
-- the resulting `RevenueAuthority` PDA is frozen into `MAINNET_QUALIFIED_REVENUE_SOURCE`, after which the referral protocol is rebuilt and re-audited/re-verified as the final artifact.
+## Missing production evidence layer — hard mainnet blocker
 
-## Explicitly rejected final configurations
+Before `qualification_evidence_status` may be set to `approved`, the actual product/service integration must define a source of truth that an arbitrary participant cannot self-generate.
 
-Do not freeze any of the following as production `qualified_revenue_source`:
+The final specification must answer, concretely:
 
-- the service treasury wallet;
-- the user's treasury/deployer MetaMask address;
-- a normal EOA/keypair controlled by one operator;
-- the temporary deployment/upgrade-authority wallet;
-- an adapter whose configuration can later be changed by an admin;
-- any source whose funding is the service-unit/activity purchase flow itself.
+- What external/on-chain event constitutes a legitimate service revenue event?
+- Who/what creates that event, and why can the beneficiary/payer not fabricate it?
+- What immutable identifier makes the economic event unique?
+- How are payer, beneficiary, stablecoin mint and gross amount bound to that evidence?
+- Can the evidence be verified entirely on-chain, or does it require a reviewed oracle/attestation mechanism?
+- If an attestation mechanism exists, what prevents one human/operator from remaining a permanent unilateral reward administrator?
+- What happens when the external source reverses, refunds or disputes a payment?
+- Which event is considered authoritative if multiple external systems represent the same payment?
 
-## Audit questions
+A generic instruction of the form “any wallet may pay X tokens and nominate beneficiary Y” must **not** be approved as the final evidence model, even though it is fully collateralized, because it permits self-generated reward events.
 
-The independent auditor should specifically answer:
+## Required final release binding
 
-- Can the same economic revenue event be counted twice?
-- Can an attacker substitute the beneficiary, mint, source token account or referral protocol?
-- Can a human/admin fabricate an event after finalization even if they provide funding?
-- Can unit-purchase funds reach this source path?
-- Can adapter or referral state be reconfigured after the advertised immutability point?
-- Is every liability created by `record_qualified_revenue` fully collateralized within the same atomic transaction?
+After the evidence layer is concrete and independently approved:
 
-Until these questions have reviewed answers and a concrete adapter/source exists, the referral protocol's production source sentinel must remain fail-closed.
+1. generate final Program IDs offline;
+2. freeze `revenue_qualification::MAINNET_ADAPTER_PROGRAM` to final adapter ID;
+3. freeze adapter `MAINNET_REFERRAL_PROGRAM` to final referral ID;
+4. freeze adapter `MAINNET_QUALIFICATION_PROGRAM` to final qualification ID;
+5. derive the final adapter Revenue Authority PDA;
+6. freeze that exact PDA into core `MAINNET_QUALIFIED_REVENUE_SOURCE`;
+7. freeze all three `[programs.mainnet]` identities;
+8. hash this approved specification into `release/mainnet-release.json` as `qualification_evidence_spec_sha256`;
+9. rebuild all three exact production artifacts and independently audit that exact final commit/binding;
+10. keep `qualification_evidence_status` other than `approved` until the reviewer/auditor accepts the actual evidence semantics.
+
+## Independent audit questions
+
+The final auditor should specifically answer:
+
+- Can the same economic revenue event be counted twice using different nonces/receipts/evidence representations?
+- Can an attacker substitute payer, beneficiary, mint, amount, source token account, qualification program, adapter or referral program?
+- Can a participant self-generate the evidence needed to create rewards?
+- Can a human/admin fabricate or approve events after advertised finalization?
+- Can unit-purchase/activity funds reach this source path?
+- Does a failed qualification/adapter/referral CPI leave any payment or receipt mutation behind?
+- Is every liability fully collateralized before accounting?
+- Can any of the three program configs or cross-program identities be redirected after initialization/finalization?
+- Are refund/reversal/dispute semantics compatible with immutable reward creation?
+
+Until the concrete evidence model has reviewed answers to these questions, the referral protocol's production source sentinel and cross-program production sentinels must remain fail-closed.
