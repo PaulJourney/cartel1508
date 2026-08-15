@@ -2,6 +2,7 @@
 members = [
   "programs/service_referral_protocol",
   "programs/revenue_adapter",
+  "programs/revenue_qualification",
 ]
 exclude = ["integration-tests"]
 resolver = "2"
