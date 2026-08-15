@@ -26,46 +26,67 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          # 1. Migrate JS smoke to evidence hash if it still uses nonce naming/layout.
+          # 1. Migrate the real-validator/localnet smoke from a freely variable nonce
+          # to the reviewed evidence hash and exactly mirror the on-chain PDA seed order.
           smoke = Path('scripts/qualification-localnet-smoke.mjs')
           s = smoke.read_text()
-          if 'nonce' in s:
-              s = s.replace('nonce', 'evidence')
-          old_js = '[EVENT_DOMAIN, payer.toBuffer(), beneficiary.toBuffer(), mint.toBuffer(), u64le(amount), evidence]'
-          new_js = '[EVENT_DOMAIN, evidence, payer.toBuffer(), beneficiary.toBuffer(), mint.toBuffer(), u64le(amount)]'
-          s = s.replace(old_js, new_js)
+          s = s.replace(
+              'function eventId(qualificationProgramId, payer, beneficiary, mint, amount, nonce) {',
+              'function eventId(qualificationProgramId, payer, beneficiary, mint, amount, evidenceHash) {'
+          )
+          s = s.replace(
+              '[EVENT_DOMAIN, payer.toBuffer(), beneficiary.toBuffer(), mint.toBuffer(), u64le(amount), nonce]',
+              '[EVENT_DOMAIN, evidenceHash, payer.toBuffer(), beneficiary.toBuffer(), mint.toBuffer(), u64le(amount)]'
+          )
+          s = s.replace('nonce1', 'evidenceHash1')
+          s = s.replace('nonce2', 'evidenceHash2')
+          s = s.replace('nonce3', 'evidenceHash3')
           smoke.write_text(s)
 
-          # 2. Migrate the compiled diagnostic LiteSVM target.
+          # 2. Migrate the LiteSVM end-to-end test to the exact current instruction ABI
+          # and exact on-chain event-id derivation.
           e2e = Path('integration-tests/tests/qualification_e2e.rs')
           r = e2e.read_text()
-          if 'nonce' in r:
-              r = r.replace('nonce', 'evidence')
-          old_rust = '''        &[\n            revenue_qualification::EVENT_DOMAIN,\n            payer.as_ref(),\n            beneficiary.as_ref(),\n            mint.as_ref(),\n            &amount_bytes,\n            &evidence,\n        ],'''
-          new_rust = '''        &[\n            revenue_qualification::EVENT_DOMAIN,\n            &evidence,\n            payer.as_ref(),\n            beneficiary.as_ref(),\n            mint.as_ref(),\n            &amount_bytes,\n        ],'''
-          r = r.replace(old_rust, new_rust)
+          r = r.replace('    nonce: [u8; 32],', '    evidence_hash: [u8; 32],')
+          old_seeds = '''        &[\n            revenue_qualification::EVENT_DOMAIN,\n            payer.as_ref(),\n            beneficiary.as_ref(),\n            mint.as_ref(),\n            &amount_bytes,\n            &nonce,\n        ],'''
+          new_seeds = '''        &[\n            revenue_qualification::EVENT_DOMAIN,\n            evidence_hash.as_ref(),\n            payer.as_ref(),\n            beneficiary.as_ref(),\n            mint.as_ref(),\n            &amount_bytes,\n        ],'''
+          if old_seeds not in r:
+              raise SystemExit('old E2E event seed layout not found')
+          r = r.replace(old_seeds, new_seeds, 1)
+          r = r.replace('nonce_1', 'evidence_hash_1')
+          r = r.replace('nonce_2', 'evidence_hash_2')
+          r = r.replace('client_nonce:', 'evidence_hash:')
+          if 'client_nonce:' in r or 'nonce_1' in r or 'nonce_2' in r or '&nonce' in r:
+              raise SystemExit('stale nonce API remains in qualification_e2e.rs')
           e2e.write_text(r)
 
-          # 3. Static gates: event identity must include evidence hash, not a free nonce,
-          # and core must expose an explicit fail-closed adapter identity.
+          # 3. Static gates now assert evidence-bound identity and explicit core adapter binding.
           static = Path('scripts/static-gates.py')
           g = static.read_text()
-          g = g.replace("'&client_nonce'", "'evidence_hash.as_ref()'")
-          g = g.replace("'&evidence'", "'evidence_hash.as_ref()'")
-          g = g.replace('payer beneficiary mint amount nonce', 'evidence payer beneficiary mint amount')
+          old_check = "    'qualification event identity binds payer beneficiary mint amount nonce': all(x in qualification for x in ['payer_key.as_ref()', 'beneficiary_key.as_ref()', 'mint.as_ref()', '&amount_bytes', '&client_nonce']),"
+          new_check = "    'qualification event identity binds evidence payer beneficiary mint amount': all(x in qualification for x in ['evidence_hash.as_ref()', 'payer_key.as_ref()', 'beneficiary_key.as_ref()', 'mint.as_ref()', '&amount_bytes']),"
+          if old_check in g:
+              g = g.replace(old_check, new_check)
           marker = "    'production launch source/time constants exist':"
-          if 'core production adapter binding constant exists' not in g and marker in g:
-              insertion = "    'core production adapter binding constant exists': 'MAINNET_REVENUE_ADAPTER_PROGRAM' in constants,\n"
-              g = g.replace(marker, insertion + marker)
+          if 'core production adapter binding constant exists' not in g:
+              if marker not in g:
+                  raise SystemExit('static gate insertion marker not found')
+              g = g.replace(
+                  marker,
+                  "    'core production adapter binding constant exists': 'MAINNET_REVENUE_ADAPTER_PROGRAM' in constants,\n" + marker,
+                  1,
+              )
+          if 'amount nonce' in g or '&client_nonce' in g:
+              raise SystemExit('stale nonce static gate remains')
           static.write_text(g)
 
-          # 4. The top-level pre-mainnet gate must incorporate the explicit qualification
-          # sub-gate and hash the FINAL qualification spec, not only the architecture note.
+          # 4. Top-level gate delegates to the dedicated qualification release gate and
+          # hashes the final qualification specification rather than the architecture note.
           gate = Path('scripts/pre-mainnet-gate.py')
           p = gate.read_text()
           import_line = 'from qualification_release_gate import evaluate as evaluate_qualification_release\n'
           if import_line not in p:
-              p = p.replace('from pathlib import Path\n', 'from pathlib import Path\n\n' + import_line)
+              p = p.replace('from pathlib import Path\n', 'from pathlib import Path\n\n' + import_line, 1)
           p = p.replace(
               'QUALIFICATION_SPEC = ROOT / "QUALIFIED_REVENUE_SOURCE_SPEC.md"',
               'QUALIFICATION_SPEC = ROOT / "QUALIFIED_REVENUE_QUALIFICATION_SPEC.md"',
@@ -85,6 +106,7 @@ jobs:
           anchor build --ignore-keys
           cargo test --locked --workspace
           cargo test --locked --manifest-path integration-tests/Cargo.toml --all-targets --no-run
+          cargo test --locked --manifest-path integration-tests/Cargo.toml --test qualification_e2e -- --nocapture
           python3 scripts/static-gates.py
           set +e
           python3 scripts/qualification_release_gate.py | tee /tmp/qualification-gate.txt
