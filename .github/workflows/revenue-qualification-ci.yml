@@ -1,0 +1,54 @@
+name: revenue-qualification-ci
+
+on:
+  push:
+    branches:
+      - agent/revenue-qualification-v0.1
+  pull_request:
+    paths:
+      - 'programs/revenue_qualification/**'
+      - 'programs/revenue_adapter/**'
+      - 'programs/service_referral_protocol/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Anchor.toml'
+      - '.github/workflows/revenue-qualification-ci.yml'
+
+concurrency:
+  group: revenue-qualification-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  qualification-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: solana-foundation/github-actions/setup-all@v0.2.15
+        with:
+          solana_version: '3.1.10'
+          anchor_version: '1.1.2'
+          node_version: '24'
+      - run: cargo-build-sbf --install-only
+      - name: Verify locked workspace dependency graph
+        run: cargo check --workspace --locked
+      - name: Run workspace Rust tests
+        run: cargo test --workspace --locked
+      - name: Build referral, adapter and qualification programs
+        run: anchor build --ignore-keys
+      - name: Verify production feature graphs compile while runtime remains fail-closed
+        run: |
+          cargo check --locked -p service_referral_protocol --features production
+          cargo check --locked -p revenue_adapter --features production
+          cargo check --locked -p revenue_qualification --features production
+      - name: Record build artifact hashes
+        run: |
+          test -s target/deploy/service_referral_protocol.so
+          test -s target/deploy/revenue_adapter.so
+          test -s target/deploy/revenue_qualification.so
+          sha256sum \
+            target/deploy/service_referral_protocol.so \
+            target/deploy/revenue_adapter.so \
+            target/deploy/revenue_qualification.so
