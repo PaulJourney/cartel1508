@@ -58,6 +58,17 @@ jobs:
           r = r.replace('client_nonce:', 'evidence_hash:')
           if 'client_nonce:' in r or 'nonce_1' in r or 'nonce_2' in r or '&nonce' in r:
               raise SystemExit('stale nonce API remains in qualification_e2e.rs')
+
+          # LiteSVM's token-mint test helper can leave a just-created mint account present
+          # but uninitialized in this larger CPI fixture. Do not fake account bytes: inspect
+          # the real legacy SPL Mint state and, only when required, initialize it with the
+          # real SPL Token initialize_mint2 instruction before Anchor deserializes Account<Mint>.
+          mint_anchor = '''    let usdc_mint = ctx\n        .svm\n        .create_token_mint(&initializer, 6)\n        .expect("USDC mint");\n'''
+          mint_guard = mint_anchor + '''\n    for mint_key in [usdt_mint.pubkey(), usdc_mint.pubkey()] {\n        let before = ctx.svm.get_account(&mint_key).expect("mint account exists");\n        assert_eq!(before.owner, spl_token::id(), "mint must be owned by legacy SPL Token");\n        assert_eq!(before.data.len(), 82, "legacy SPL Mint layout must be 82 bytes");\n        if before.data[45] != 1 {\n            let initialize_mint_ix = spl_token::instruction::initialize_mint2(\n                &spl_token::id(),\n                &mint_key,\n                &initializer.pubkey(),\n                None,\n                6,\n            )\n            .expect("build initialize_mint2");\n            let initialize_mint_tx = Transaction::new_signed_with_payer(\n                &[initialize_mint_ix],\n                Some(&initializer.pubkey()),\n                &[&initializer],\n                ctx.svm.latest_blockhash(),\n            );\n            ctx.svm\n                .send_transaction(initialize_mint_tx)\n                .expect("initialize legacy SPL mint");\n        }\n        let after = ctx.svm.get_account(&mint_key).expect("initialized mint exists");\n        assert_eq!(after.owner, spl_token::id());\n        assert_eq!(after.data.len(), 82);\n        assert_eq!(after.data[45], 1, "SPL Mint must be initialized before protocol initialize");\n    }\n'''
+          if 'SPL Mint must be initialized before protocol initialize' not in r:
+              if mint_anchor not in r:
+                  raise SystemExit('E2E mint setup anchor not found')
+              r = r.replace(mint_anchor, mint_guard, 1)
           e2e.write_text(r)
 
           # 3. Static gates now assert evidence-bound identity and explicit core adapter binding.
