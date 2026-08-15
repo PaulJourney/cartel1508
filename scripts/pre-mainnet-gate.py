@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -57,6 +58,13 @@ def git_output(*args: str) -> str | None:
         return None
 
 
+def release_source_sha() -> str | None:
+    # On pull_request workflows GitHub checks out a synthetic merge commit.
+    # If the workflow supplies the audited head SHA, prefer it; otherwise use HEAD.
+    explicit = os.environ.get("RELEASE_SOURCE_SHA", "").strip()
+    return explicit or git_output("rev-parse", "HEAD")
+
+
 def tracked_secret_candidates() -> list[str]:
     out = git_output("ls-files")
     if out is None:
@@ -72,6 +80,17 @@ def tracked_secret_candidates() -> list[str]:
         ):
             bad.append(name)
     return bad
+
+
+def qualification_status(text: str) -> str | None:
+    matches = re.findall(
+        r"^QUALIFICATION_SPEC_STATUS:\s*([A-Z_]+)\s*$",
+        text,
+        flags=re.MULTILINE,
+    )
+    if len(matches) != 1:
+        return None
+    return matches[0]
 
 
 def validate_sha_field(manifest: dict, key: str, blockers: list[str]) -> str | None:
@@ -172,7 +191,10 @@ def main() -> int:
         blockers.append("qualified-revenue product qualification specification is missing")
     else:
         qualification_text = QUALIFICATION_SPEC.read_text()
-        if "QUALIFICATION_SPEC_STATUS: FINAL" not in qualification_text:
+        status = qualification_status(qualification_text)
+        if status is None:
+            blockers.append("qualified-revenue product qualification specification has invalid or duplicate status marker")
+        elif status != "FINAL":
             blockers.append("qualified-revenue product qualification specification is not FINAL")
         qualification_spec_hash = sha256_file(QUALIFICATION_SPEC)
         notes.append(f"qualification specification SHA-256: {qualification_spec_hash}")
@@ -237,11 +259,11 @@ def main() -> int:
     if tracked:
         blockers.append("secret-like deployment files are tracked: " + ", ".join(tracked))
 
-    git_head = git_output("rev-parse", "HEAD")
-    if not git_head:
-        blockers.append("cannot resolve current git HEAD")
+    source_sha = release_source_sha()
+    if not source_sha:
+        blockers.append("cannot resolve release source git SHA")
     else:
-        notes.append(f"git HEAD: {git_head}")
+        notes.append(f"release source SHA: {source_sha}")
 
     git_status = git_output("status", "--porcelain", "--untracked-files=all")
     if git_status is None:
@@ -300,8 +322,8 @@ def main() -> int:
             blockers.append("release manifest qualification_spec_sha256 does not match local FINAL specification")
 
         manifest_commit = manifest.get("commit_sha")
-        if git_head and manifest_commit != git_head:
-            blockers.append("release manifest commit_sha does not match current git HEAD")
+        if source_sha and manifest_commit != source_sha:
+            blockers.append("release manifest commit_sha does not match release source SHA")
 
         core_hash = validate_sha_field(manifest, "so_sha256", blockers)
         adapter_hash = validate_sha_field(manifest, "adapter_so_sha256", blockers)
