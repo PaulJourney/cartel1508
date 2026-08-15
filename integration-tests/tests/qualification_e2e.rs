@@ -1,13 +1,11 @@
 use anchor_lang::{prelude::*, AccountDeserialize};
-use anchor_litesvm::{AnchorLiteSVM, AssertionHelpers, ProgramTestExt, TestHelpers};
+use anchor_litesvm::{AnchorLiteSVM, AssertionHelpers, Program, ProgramTestExt, TestHelpers};
 use revenue_adapter::{RevenueReceipt, CONFIG_SEED, RECEIPT_SEED, REVENUE_AUTHORITY_SEED};
 use service_referral_protocol::state::UserState;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
 const REFERRAL_BYTES: &[u8] = include_bytes!("../../target/deploy/service_referral_protocol.so");
-const ADAPTER_BYTES: &[u8] = include_bytes!("../../target/deploy/revenue_adapter.so");
-const QUALIFICATION_BYTES: &[u8] = include_bytes!("../../target/deploy/revenue_qualification.so");
 const UNIT: u64 = 1_000_000;
 
 fn derived_event_id(
@@ -15,17 +13,17 @@ fn derived_event_id(
     beneficiary: Pubkey,
     mint: Pubkey,
     amount: u64,
-    nonce: [u8; 32],
+    evidence_hash: [u8; 32],
 ) -> [u8; 32] {
     let amount_bytes = amount.to_le_bytes();
     Pubkey::find_program_address(
         &[
             revenue_qualification::EVENT_DOMAIN,
+            evidence_hash.as_ref(),
             payer.as_ref(),
             beneficiary.as_ref(),
             mint.as_ref(),
             &amount_bytes,
-            &nonce,
         ],
         &revenue_qualification::ID,
     )
@@ -242,12 +240,18 @@ fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
         .assert_success();
 
     // Only now add the two downstream CPI programs to the already-proven referral fixture.
-    ctx.deploy_program(revenue_adapter::ID, ADAPTER_BYTES);
-    ctx.deploy_program(revenue_qualification::ID, QUALIFICATION_BYTES);
+    // Cargo runs this integration test with integration-tests as the current directory.
+    let adapter_bytes = std::fs::read("../target/deploy/revenue_adapter.so")
+        .expect("read revenue adapter BPF image");
+    let qualification_bytes = std::fs::read("../target/deploy/revenue_qualification.so")
+        .expect("read revenue qualification BPF image");
+    ctx.deploy_program(revenue_adapter::ID, &adapter_bytes);
+    ctx.deploy_program(revenue_qualification::ID, &qualification_bytes);
 
-    ctx.program_id = revenue_adapter::ID;
-    let initialize_adapter_ix = ctx
-        .program()
+    let adapter_program = Program::new(revenue_adapter::ID);
+    let qualification_program = Program::new(revenue_qualification::ID);
+
+    let initialize_adapter_ix = adapter_program
         .accounts(revenue_adapter::accounts::Initialize {
             initializer: initializer.pubkey(),
             config: adapter_config,
@@ -282,14 +286,13 @@ fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
     ctx.svm.assert_token_balance(&vault_usdc, 0);
     ctx.svm.assert_token_balance(&treasury_usdc, 10 * UNIT);
 
-    ctx.program_id = revenue_qualification::ID;
-    let nonce_1 = [1u8; 32];
+    let evidence_hash_1 = [1u8; 32];
     let event_1 = derived_event_id(
         customer.pubkey(),
         user_pda,
         usdc_mint.pubkey(),
         revenue_amount,
-        nonce_1,
+        evidence_hash_1,
     );
     let receipt_1 = Pubkey::find_program_address(
         &[RECEIPT_SEED, event_1.as_ref()],
@@ -297,8 +300,7 @@ fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
     )
     .0;
 
-    let success_ix = ctx
-        .program()
+    let success_ix = qualification_program
         .accounts(revenue_qualification::accounts::QualifyPaymentAndRoute {
             payer: customer.pubkey(),
             payer_source_token: customer_usdc,
@@ -328,7 +330,7 @@ fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
             system_program: anchor_lang::system_program::ID,
         })
         .args(revenue_qualification::instruction::QualifyPaymentAndRoute {
-            client_nonce: nonce_1,
+            evidence_hash: evidence_hash_1,
             amount: revenue_amount,
         })
         .instruction()
@@ -348,6 +350,7 @@ fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
     let receipt =
         RevenueReceipt::try_deserialize(&mut receipt_data).expect("deserialize receipt");
     assert_eq!(receipt.event_id, event_1);
+    assert_eq!(receipt.evidence_hash, evidence_hash_1);
     assert_eq!(receipt.beneficiary, user_pda);
     assert_eq!(receipt.mint, usdc_mint.pubkey());
     assert_eq!(receipt.amount, revenue_amount);
@@ -361,8 +364,7 @@ fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
     // Exact replay: the receipt already exists. The attempted second customer transfer must
     // be rolled back together with the rejected adapter CPI.
     ctx.svm.expire_blockhash();
-    let replay_ix = ctx
-        .program()
+    let replay_ix = qualification_program
         .accounts(revenue_qualification::accounts::QualifyPaymentAndRoute {
             payer: customer.pubkey(),
             payer_source_token: customer_usdc,
@@ -392,7 +394,7 @@ fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
             system_program: anchor_lang::system_program::ID,
         })
         .args(revenue_qualification::instruction::QualifyPaymentAndRoute {
-            client_nonce: nonce_1,
+            evidence_hash: evidence_hash_1,
             amount: revenue_amount,
         })
         .instruction()
@@ -410,13 +412,13 @@ fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
     // A different event with invalid ancestry must fail in the referral CPI. The preceding
     // customer payment and newly-created adapter receipt must both disappear atomically.
     ctx.svm.expire_blockhash();
-    let nonce_2 = [2u8; 32];
+    let evidence_hash_2 = [2u8; 32];
     let event_2 = derived_event_id(
         customer.pubkey(),
         user_pda,
         usdc_mint.pubkey(),
         revenue_amount,
-        nonce_2,
+        evidence_hash_2,
     );
     let receipt_2 = Pubkey::find_program_address(
         &[RECEIPT_SEED, event_2.as_ref()],
@@ -425,8 +427,7 @@ fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
     .0;
     assert!(ctx.svm.get_account(&receipt_2).is_none());
 
-    let downstream_failure_ix = ctx
-        .program()
+    let downstream_failure_ix = qualification_program
         .accounts(revenue_qualification::accounts::QualifyPaymentAndRoute {
             payer: customer.pubkey(),
             payer_source_token: customer_usdc,
@@ -456,7 +457,7 @@ fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
             system_program: anchor_lang::system_program::ID,
         })
         .args(revenue_qualification::instruction::QualifyPaymentAndRoute {
-            client_nonce: nonce_2,
+            evidence_hash: evidence_hash_2,
             amount: revenue_amount,
         })
         .instruction()

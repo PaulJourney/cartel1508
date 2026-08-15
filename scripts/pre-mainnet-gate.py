@@ -10,13 +10,15 @@ import time
 import tomllib
 from pathlib import Path
 
+from qualification_release_gate import evaluate as evaluate_qualification_release
+
 ROOT = Path(__file__).resolve().parents[1]
 CORE_CONSTANTS = ROOT / "programs/service_referral_protocol/src/constants.rs"
 CORE_LIB = ROOT / "programs/service_referral_protocol/src/lib.rs"
 ADAPTER_LIB = ROOT / "programs/revenue_adapter/src/lib.rs"
 QUALIFICATION_LIB = ROOT / "programs/revenue_qualification/src/lib.rs"
 ANCHOR = ROOT / "Anchor.toml"
-QUALIFICATION_SPEC = ROOT / "QUALIFIED_REVENUE_SOURCE_SPEC.md"
+QUALIFICATION_SPEC = ROOT / "QUALIFIED_REVENUE_QUALIFICATION_SPEC.md"
 MANIFEST = ROOT / "release/mainnet-release.json"
 ARTIFACT_CANDIDATES = {
     "referral_so_sha256": [
@@ -253,6 +255,10 @@ def require_sha256(blockers: list[str], manifest: dict, key: str) -> str | None:
 def main() -> int:
     blockers: list[str] = []
     notes: list[str] = []
+
+    qualification_blockers, qualification_notes = evaluate_qualification_release(ROOT)
+    blockers.extend(qualification_blockers)
+    notes.extend(qualification_notes)
 
     try:
         assert_pda_self_test()

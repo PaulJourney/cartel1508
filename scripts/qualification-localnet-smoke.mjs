@@ -58,9 +58,9 @@ function asBigInt(value) {
   return BigInt(value.toString());
 }
 
-function eventId(qualificationProgramId, payer, beneficiary, mint, amount, nonce) {
+function eventId(qualificationProgramId, payer, beneficiary, mint, amount, evidenceHash) {
   return PublicKey.findProgramAddressSync(
-    [EVENT_DOMAIN, payer.toBuffer(), beneficiary.toBuffer(), mint.toBuffer(), u64le(amount), nonce],
+    [EVENT_DOMAIN, evidenceHash, payer.toBuffer(), beneficiary.toBuffer(), mint.toBuffer(), u64le(amount)],
     qualificationProgramId,
   )[0].toBuffer();
 }
@@ -322,11 +322,11 @@ const treasuryQualifiedDelta = 43n * TOKEN_SCALE + 5n * TOKEN_SCALE + (2n * TOKE
 const userLiability = direct + pioneerAssigned;
 const rootAccounts = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [`upline${i + 1}`, technicalRoot]));
 
-const nonce1 = Buffer.alloc(32, 1);
-const event1 = eventId(qualificationId, customer.publicKey, user, usdcMint, revenueAmount, nonce1);
+const evidenceHash1 = Buffer.alloc(32, 1);
+const event1 = eventId(qualificationId, customer.publicKey, user, usdcMint, revenueAmount, evidenceHash1);
 const [receipt1] = PublicKey.findProgramAddressSync([RECEIPT_SEED, event1], adapterId);
 const qualify1 = await qualification.methods
-  .qualifyPaymentAndRoute([...nonce1], new BN(revenueAmount.toString()))
+  .qualifyPaymentAndRoute([...evidenceHash1], new BN(revenueAmount.toString()))
   .accounts({
     payer: customer.publicKey,
     payerSourceToken: customerUsdc.address,
@@ -376,11 +376,11 @@ invariant((await tokenAmount(connection, vaultUsdc.address)) === replayVaultBefo
 // different executable before value enters the adapter path. The account below is a
 // real executable (the qualification program itself), so this specifically exercises
 // the immutable referral binding rather than merely failing an executable check.
-const nonce3 = Buffer.alloc(32, 3);
-const event3 = eventId(qualificationId, customer.publicKey, user, usdcMint, revenueAmount, nonce3);
+const evidenceHash3 = Buffer.alloc(32, 3);
+const event3 = eventId(qualificationId, customer.publicKey, user, usdcMint, revenueAmount, evidenceHash3);
 const [receipt3] = PublicKey.findProgramAddressSync([RECEIPT_SEED, event3], adapterId);
 const substitutedReferral = await qualification.methods
-  .qualifyPaymentAndRoute([...nonce3], new BN(revenueAmount.toString()))
+  .qualifyPaymentAndRoute([...evidenceHash3], new BN(revenueAmount.toString()))
   .accounts({
     payer: customer.publicKey,
     payerSourceToken: customerUsdc.address,
@@ -414,12 +414,12 @@ invariant((await connection.getAccountInfo(receipt3, "confirmed")) === null, "re
 
 // Fresh receipt + deliberately wrong ancestry. Adapter creates the receipt before referral CPI;
 // downstream failure must therefore roll back both the customer's token transfer and receipt creation.
-const nonce2 = Buffer.alloc(32, 2);
-const event2 = eventId(qualificationId, customer.publicKey, user, usdcMint, revenueAmount, nonce2);
+const evidenceHash2 = Buffer.alloc(32, 2);
+const event2 = eventId(qualificationId, customer.publicKey, user, usdcMint, revenueAmount, evidenceHash2);
 const [receipt2] = PublicKey.findProgramAddressSync([RECEIPT_SEED, event2], adapterId);
 const wrongRootAccounts = { ...rootAccounts, upline1: user };
 const badDownstream = await qualification.methods
-  .qualifyPaymentAndRoute([...nonce2], new BN(revenueAmount.toString()))
+  .qualifyPaymentAndRoute([...evidenceHash2], new BN(revenueAmount.toString()))
   .accounts({
     payer: customer.publicKey,
     payerSourceToken: customerUsdc.address,
