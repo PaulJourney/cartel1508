@@ -29,6 +29,8 @@ jobs:
           cargo tree --manifest-path integration-tests/Cargo.toml -i anchor-spl || true
       - name: Re-run proven economic fixture under current graph
         run: cargo test --locked --manifest-path integration-tests/Cargo.toml --test economic -- --nocapture
+      - name: Run referral bootstrap probe with adapter PDA source
+        run: cargo test --locked --manifest-path integration-tests/Cargo.toml --test qualification_bootstrap_probe -- --nocapture
       - name: Run atomic qualification end-to-end test
         run: cargo test --locked --manifest-path integration-tests/Cargo.toml --test qualification_e2e -- --nocapture
       - name: Commit integration lock and remove temporary workflow
