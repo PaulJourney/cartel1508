@@ -1,5 +1,21 @@
 name: protocol-ci
-on: [pull_request]
+on:
+  push:
+    branches: [agent/revenue-adapter-v0.1]
+    paths:
+      - 'programs/service_referral_protocol/**'
+      - 'programs/revenue_adapter/**'
+      - 'programs/revenue_qualification/**'
+      - 'integration-tests/**'
+      - 'scripts/pre-mainnet-gate.py'
+      - 'scripts/static-gates.py'
+      - 'tests/**'
+      - 'release/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Anchor.toml'
+      - '.github/workflows/ci.yml'
+  pull_request:
 permissions:
   contents: read
 jobs:
