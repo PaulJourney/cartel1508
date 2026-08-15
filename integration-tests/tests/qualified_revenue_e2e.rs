@@ -21,8 +21,10 @@ fn verified_evidence_chain_is_collateralized_atomic_and_replay_safe() {
     ]);
 
     // LiteSVM starts at Unix timestamp 0. Production evidence requires a
-    // strictly positive settlement timestamp, so pin the test clock explicitly.
-    ctx.svm.warp_to_timestamp(1_700_000_000);
+    // strictly positive settlement timestamp, so pin the Clock sysvar explicitly.
+    let mut test_clock = ctx.svm.get_sysvar::<Clock>();
+    test_clock.unix_timestamp = 1_700_000_000;
+    ctx.svm.set_sysvar(&test_clock);
 
     let core = Program::new(service_referral_protocol::ID);
     let adapter = Program::new(revenue_adapter::ID);
