@@ -20,6 +20,7 @@ jobs:
       - run: cargo-build-sbf --install-only
       - name: Generate lock and compile all programs
         run: |
+          echo "qualification gateway validation run"
           cargo generate-lockfile
           cargo check --workspace
           cargo test --workspace
