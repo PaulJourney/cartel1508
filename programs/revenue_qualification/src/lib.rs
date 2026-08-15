@@ -1,5 +1,4 @@
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::hash::hashv;
 use anchor_spl::associated_token::get_associated_token_address_with_program_id;
 use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 use revenue_adapter::cpi as adapter_cpi;
@@ -78,18 +77,24 @@ pub mod revenue_qualification {
             QualificationError::NonCanonicalRevenueSource
         );
 
-        // Bind the replay key to the actual payer, beneficiary, mint, amount and nonce.
+        // Bind the replay key to payer, beneficiary, mint, amount and nonce using
+        // Solana's deterministic PDA derivation. The resulting 32-byte address is
+        // used only as an event identifier; no account is created at this PDA.
         let payer_key = ctx.accounts.payer.key();
         let beneficiary_key = ctx.accounts.beneficiary.key();
         let amount_bytes = amount.to_le_bytes();
-        let event_id = hashv(&[
-            EVENT_DOMAIN,
-            payer_key.as_ref(),
-            beneficiary_key.as_ref(),
-            mint.as_ref(),
-            &amount_bytes,
-            &client_nonce,
-        ])
+        let event_id = Pubkey::find_program_address(
+            &[
+                EVENT_DOMAIN,
+                payer_key.as_ref(),
+                beneficiary_key.as_ref(),
+                mint.as_ref(),
+                &amount_bytes,
+                &client_nonce,
+            ],
+            &crate::ID,
+        )
+        .0
         .to_bytes();
 
         let expected_receipt = Pubkey::find_program_address(
