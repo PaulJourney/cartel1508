@@ -43,6 +43,7 @@ jobs:
           set -e
           printf '%s\n' "$output"
           test "$status" -ne 0
+          grep -q 'PDA derivation self-test passed against real-validator vectors' <<<"$output"
           grep -q 'referral Program ID is still the development identity' <<<"$output"
           grep -q 'adapter Program ID is still the development identity' <<<"$output"
           grep -q 'qualification Program ID is still the development identity' <<<"$output"
@@ -50,6 +51,7 @@ jobs:
           grep -q 'adapter MAINNET_QUALIFICATION_PROGRAM is still fail-closed' <<<"$output"
           grep -q 'qualification MAINNET_ADAPTER_PROGRAM is still fail-closed' <<<"$output"
           grep -q 'qualified revenue source is still the fail-closed sentinel' <<<"$output"
+          grep -q 'core MAINNET_QUALIFIED_REVENUE_SOURCE does not equal the Revenue Authority PDA' <<<"$output"
           grep -q 'registration_open_at is not frozen' <<<"$output"
           grep -q 'release/mainnet-release.json is missing' <<<"$output"
           grep -q 'RESULT: BLOCKED' <<<"$output"
