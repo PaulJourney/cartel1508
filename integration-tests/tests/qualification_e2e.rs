@@ -35,11 +35,19 @@ fn derived_event_id(
 
 #[test]
 fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
-    let mut ctx = AnchorLiteSVM::build_with_programs(&[
-        (service_referral_protocol::ID, REFERRAL_BYTES),
-        (revenue_adapter::ID, ADAPTER_BYTES),
-        (revenue_qualification::ID, QUALIFICATION_BYTES),
-    ]);
+    // Start from the exact single-program fixture used by the already-green economic tests,
+    // then deploy the two CPI callees into the same VM. This keeps SPL helper semantics
+    // identical while still exercising the full three-program call chain.
+    let mut ctx = AnchorLiteSVM::build_with_program(
+        service_referral_protocol::ID,
+        REFERRAL_BYTES,
+    );
+    ctx.svm
+        .add_program(revenue_adapter::ID, ADAPTER_BYTES)
+        .expect("deploy revenue adapter");
+    ctx.svm
+        .add_program(revenue_qualification::ID, QUALIFICATION_BYTES)
+        .expect("deploy qualification gateway");
 
     let initializer = ctx
         .svm
@@ -67,6 +75,12 @@ fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
         .create_token_mint(&initializer, 6)
         .expect("USDC mint");
 
+    // Assert the exact prerequisite that failed in the first multi-program harness.
+    ctx.svm
+        .assert_account_owner(&usdt_mint.pubkey(), &spl_token::id());
+    ctx.svm
+        .assert_account_owner(&usdc_mint.pubkey(), &spl_token::id());
+
     let (protocol_pda, _) = Pubkey::find_program_address(
         &[b"protocol"],
         &service_referral_protocol::ID,
@@ -88,7 +102,8 @@ fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
         &service_referral_protocol::ID,
     );
 
-    let (adapter_config, _) = Pubkey::find_program_address(&[CONFIG_SEED], &revenue_adapter::ID);
+    let (adapter_config, _) =
+        Pubkey::find_program_address(&[CONFIG_SEED], &revenue_adapter::ID);
     let (revenue_authority, _) =
         Pubkey::find_program_address(&[REVENUE_AUTHORITY_SEED], &revenue_adapter::ID);
     let (qualification_authority, _) = Pubkey::find_program_address(
@@ -96,8 +111,6 @@ fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
         &revenue_qualification::ID,
     );
 
-    // The referral protocol trusts only the adapter-owned PDA as its qualified revenue source.
-    ctx.program_id = service_referral_protocol::ID;
     let registration_open_at = ctx.svm.get_sysvar::<Clock>().unix_timestamp;
     let initialize_protocol_ix = ctx
         .program()
@@ -138,7 +151,6 @@ fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
         .expect("execute register")
         .assert_success();
 
-    // Freeze the adapter to the exact referral + qualification program identities.
     ctx.program_id = revenue_adapter::ID;
     let initialize_adapter_ix = ctx
         .program()
@@ -194,18 +206,20 @@ fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
         &spl_token::id(),
     );
 
-    let create_vault_usdt = spl_associated_token_account::instruction::create_associated_token_account(
-        &initializer.pubkey(),
-        &vault_authority,
-        &usdt_mint.pubkey(),
-        &spl_token::id(),
-    );
-    let create_vault_usdc = spl_associated_token_account::instruction::create_associated_token_account(
-        &initializer.pubkey(),
-        &vault_authority,
-        &usdc_mint.pubkey(),
-        &spl_token::id(),
-    );
+    let create_vault_usdt =
+        spl_associated_token_account::instruction::create_associated_token_account(
+            &initializer.pubkey(),
+            &vault_authority,
+            &usdt_mint.pubkey(),
+            &spl_token::id(),
+        );
+    let create_vault_usdc =
+        spl_associated_token_account::instruction::create_associated_token_account(
+            &initializer.pubkey(),
+            &vault_authority,
+            &usdc_mint.pubkey(),
+            &spl_token::id(),
+        );
     let create_revenue_usdc =
         spl_associated_token_account::instruction::create_associated_token_account(
             &initializer.pubkey(),
@@ -223,12 +237,16 @@ fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
         .send_transaction(create_protocol_atas)
         .expect("create PDA-owned ATAs");
 
-    // Activate the beneficiary with the required 10 service units.
     ctx.svm
         .mint_to(&usdc_mint.pubkey(), &user_usdc, &initializer, 10 * UNIT)
         .expect("mint activation funds");
     ctx.svm
-        .mint_to(&usdc_mint.pubkey(), &customer_usdc, &initializer, 300 * UNIT)
+        .mint_to(
+            &usdc_mint.pubkey(),
+            &customer_usdc,
+            &initializer,
+            300 * UNIT,
+        )
         .expect("mint external customer payment funds");
 
     ctx.program_id = service_referral_protocol::ID;
@@ -325,8 +343,6 @@ fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
         .expect("execute qualification success")
         .assert_success();
 
-    // Real customer value was consumed exactly once and the adapter source ATA is drained
-    // atomically into the referral vault/treasury accounting.
     ctx.svm.assert_token_balance(&customer_usdc, 200 * UNIT);
     ctx.svm.assert_token_balance(&revenue_usdc, 0);
     ctx.svm.assert_token_balance(&vault_usdc, user_liability);
@@ -335,7 +351,8 @@ fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
 
     let receipt_account = ctx.svm.get_account(&receipt_1).expect("receipt exists");
     let mut receipt_data = receipt_account.data.as_slice();
-    let receipt = RevenueReceipt::try_deserialize(&mut receipt_data).expect("deserialize receipt");
+    let receipt =
+        RevenueReceipt::try_deserialize(&mut receipt_data).expect("deserialize receipt");
     assert_eq!(receipt.event_id, event_1);
     assert_eq!(receipt.beneficiary, user_pda);
     assert_eq!(receipt.mint, usdc_mint.pubkey());
@@ -347,9 +364,8 @@ fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
     let user_state = UserState::try_deserialize(&mut user_data).expect("deserialize beneficiary");
     assert_eq!(user_state.direct_accrued_usdc, direct);
 
-    // Replay the exact same economic event. The adapter receipt already exists, so the CPI
-    // must fail. The outer token transfer must roll back: customer and protocol balances
-    // remain byte-for-byte economically unchanged.
+    // Exact replay: receipt already exists. Because the customer transfer and adapter CPI are
+    // in one Solana transaction, the attempted second payment must also be rolled back.
     ctx.svm.expire_blockhash();
     let replay_ix = ctx
         .program()
@@ -390,16 +406,15 @@ fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
     let replay = ctx
         .execute_instruction(replay_ix, &[&customer])
         .expect("execute replay");
-    assert!(!replay.is_success(), "same event receipt must reject replay");
+    assert!(!replay.is_success(), "same receipt must reject replay");
     ctx.svm.assert_token_balance(&customer_usdc, 200 * UNIT);
     ctx.svm.assert_token_balance(&revenue_usdc, 0);
     ctx.svm.assert_token_balance(&vault_usdc, user_liability);
     ctx.svm
         .assert_token_balance(&treasury_usdc, 10 * UNIT + treasury_delta);
 
-    // A different event reaches the adapter, but an invalid ancestry account makes the
-    // downstream referral CPI fail. Both the preceding customer transfer and newly-created
-    // adapter receipt must disappear through transaction rollback.
+    // New event but invalid ancestry: referral CPI must reject it, and the entire outer
+    // transaction (including token transfer and receipt creation) must disappear.
     ctx.svm.expire_blockhash();
     let nonce_2 = [2u8; 32];
     let event_2 = derived_event_id(
@@ -433,7 +448,7 @@ fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
             vault_token: vault_usdc,
             service_treasury_token: treasury_usdc,
             beneficiary: user_pda,
-            upline_1: user_pda, // deliberately wrong: expected technical root
+            upline_1: user_pda, // deliberately wrong; expected technical root
             upline_2: technical_root,
             upline_3: technical_root,
             upline_4: technical_root,
@@ -457,7 +472,7 @@ fn real_payment_is_atomic_replay_safe_and_rolls_back_on_downstream_failure() {
         .expect("execute downstream failure");
     assert!(
         !downstream_failure.is_success(),
-        "invalid ancestry must reject the routed revenue"
+        "invalid ancestry must reject routed revenue"
     );
 
     ctx.svm.assert_token_balance(&customer_usdc, 200 * UNIT);
