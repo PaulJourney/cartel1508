@@ -43,17 +43,15 @@ jobs:
           r = r.replace('const ADAPTER_BYTES: &[u8] = include_bytes!("../../target/deploy/revenue_adapter.so");\n', '')
           r = r.replace('const QUALIFICATION_BYTES: &[u8] = include_bytes!("../../target/deploy/revenue_qualification.so");\n', '')
           old_deploy = '''    // Only now add the two downstream CPI programs to the already-proven referral fixture.\n    ctx.deploy_program(revenue_adapter::ID, ADAPTER_BYTES);\n    ctx.deploy_program(revenue_qualification::ID, QUALIFICATION_BYTES);\n\n    ctx.program_id = revenue_adapter::ID;\n    let initialize_adapter_ix = ctx\n        .program()\n'''
-          new_deploy = '''    // Only now add the two downstream CPI programs to the already-proven referral fixture.\n    // Load downstream BPF images at runtime to keep the referral bootstrap binary shape stable.\n    let adapter_bytes = std::fs::read("target/deploy/revenue_adapter.so")\n        .expect("read revenue adapter BPF image");\n    let qualification_bytes = std::fs::read("target/deploy/revenue_qualification.so")\n        .expect("read revenue qualification BPF image");\n    ctx.deploy_program(revenue_adapter::ID, &adapter_bytes);\n    ctx.deploy_program(revenue_qualification::ID, &qualification_bytes);\n\n    // AnchorContext::program() remains bound to the program supplied at construction.\n    // Use explicit builders for every downstream program instead of mutating ctx.program_id.\n    let adapter_program = Program::new(revenue_adapter::ID);\n    let qualification_program = Program::new(revenue_qualification::ID);\n\n    let initialize_adapter_ix = adapter_program\n'''
+          new_deploy = '''    // Only now add the two downstream CPI programs to the already-proven referral fixture.\n    // Cargo runs this integration test with integration-tests as the current directory.\n    let adapter_bytes = std::fs::read("../target/deploy/revenue_adapter.so")\n        .expect("read revenue adapter BPF image");\n    let qualification_bytes = std::fs::read("../target/deploy/revenue_qualification.so")\n        .expect("read revenue qualification BPF image");\n    ctx.deploy_program(revenue_adapter::ID, &adapter_bytes);\n    ctx.deploy_program(revenue_qualification::ID, &qualification_bytes);\n\n    // AnchorContext::program() remains bound to the program supplied at construction.\n    // Use explicit builders for every downstream program instead of mutating ctx.program_id.\n    let adapter_program = Program::new(revenue_adapter::ID);\n    let qualification_program = Program::new(revenue_qualification::ID);\n\n    let initialize_adapter_ix = adapter_program\n'''
           if old_deploy not in r:
               raise SystemExit('old downstream deployment/builder block missing')
           r = r.replace(old_deploy, new_deploy, 1)
 
-          # The remaining post-bootstrap instructions are all qualification-program instructions.
           marker = '    ctx.program_id = revenue_qualification::ID;\n'
           if marker not in r:
               raise SystemExit('qualification program switch marker missing')
           r = r.replace(marker, '', 1)
-          # Replace ctx.program() only after the qualification switch point.
           split_token = '    let evidence_hash_1 = [1u8; 32];'
           if split_token not in r:
               raise SystemExit('evidence event-1 marker missing after migration')
@@ -61,7 +59,6 @@ jobs:
           after = after.replace('ctx\n        .program()', 'qualification_program')
           r = before + split_token + after
 
-          # Prove no stale API or misleading mutable program switch remains.
           if 'client_nonce:' in r or '&nonce' in r or 'ctx.program_id =' in r:
               raise SystemExit('stale E2E API/program switch remains')
           p.write_text(r)
