@@ -6,6 +6,9 @@ on:
       - 'programs/service_referral_protocol/**'
       - 'programs/revenue_adapter/**'
       - 'programs/revenue_qualification/**'
+      - 'scripts/pre-mainnet-gate.py'
+      - 'release/**'
+      - 'QUALIFIED_REVENUE_SOURCE_SPEC.md'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'Anchor.toml'
@@ -15,6 +18,9 @@ on:
       - 'programs/service_referral_protocol/**'
       - 'programs/revenue_adapter/**'
       - 'programs/revenue_qualification/**'
+      - 'scripts/pre-mainnet-gate.py'
+      - 'release/**'
+      - 'QUALIFIED_REVENUE_SOURCE_SPEC.md'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'Anchor.toml'
@@ -43,6 +49,13 @@ jobs:
           sha256sum target/verifiable/service_referral_protocol.so | tee target/verifiable/service_referral_protocol.so.sha256
           sha256sum target/verifiable/revenue_adapter.so | tee target/verifiable/revenue_adapter.so.sha256
           sha256sum target/verifiable/revenue_qualification.so | tee target/verifiable/revenue_qualification.so.sha256
+      - name: Require final READY gate only after manifest freeze
+        run: |
+          if [ -f release/mainnet-release.json ]; then
+            python3 scripts/pre-mainnet-gate.py
+          else
+            echo 'No final manifest: verifiable build is development evidence only; mainnet remains fail-closed.'
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: anchor-verifiable-three-program-production
