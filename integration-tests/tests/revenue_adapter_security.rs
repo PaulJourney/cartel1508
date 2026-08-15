@@ -1,5 +1,5 @@
 use anchor_lang::{prelude::*, AccountDeserialize};
-use anchor_litesvm::{AnchorLiteSVM, AssertionHelpers, TestHelpers};
+use anchor_litesvm::{AnchorLiteSVM, AssertionHelpers, Signer, TestHelpers};
 use revenue_adapter::{AdapterConfig, CONFIG_SEED, QUALIFIER_AUTHORITY_SEED, REVENUE_AUTHORITY_SEED};
 
 const ADAPTER_BYTES: &[u8] = include_bytes!("../../target/deploy/revenue_adapter.so");
