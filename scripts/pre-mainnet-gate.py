@@ -7,24 +7,37 @@ import re
 import subprocess
 import sys
 import time
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CONSTANTS = ROOT / "programs/service_referral_protocol/src/constants.rs"
-LIB = ROOT / "programs/service_referral_protocol/src/lib.rs"
+CORE_CONSTANTS = ROOT / "programs/service_referral_protocol/src/constants.rs"
+CORE_LIB = ROOT / "programs/service_referral_protocol/src/lib.rs"
+ADAPTER_LIB = ROOT / "programs/revenue_adapter/src/lib.rs"
+QUALIFICATION_LIB = ROOT / "programs/revenue_qualification/src/lib.rs"
 ANCHOR = ROOT / "Anchor.toml"
+QUALIFICATION_SPEC = ROOT / "QUALIFIED_REVENUE_SOURCE_SPEC.md"
 MANIFEST = ROOT / "release/mainnet-release.json"
-ARTIFACT = ROOT / "target/deploy/service_referral_protocol.so"
+ARTIFACTS = {
+    "referral_so_sha256": ROOT / "target/deploy/service_referral_protocol.so",
+    "revenue_adapter_so_sha256": ROOT / "target/deploy/revenue_adapter.so",
+    "revenue_qualification_so_sha256": ROOT / "target/deploy/revenue_qualification.so",
+}
 
 EXPECTED = {
     "service_treasury": "AepYo8xanmKuRiLVeYQuCTJoQr1nyKiTApoKwHMEg8fn",
     "usdt_mint": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
     "usdc_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
 }
-SENTINEL_SOURCE = "11111111111111111111111111111111"
-DEVELOPMENT_PROGRAM_ID = "4AuoBkj4vkH2K1jwUuECtVBqF6Q74efjGbaw7btuNjRV"
+SENTINEL_PUBKEY = "11111111111111111111111111111111"
+DEVELOPMENT_IDS = {
+    "referral": "4AuoBkj4vkH2K1jwUuECtVBqF6Q74efjGbaw7btuNjRV",
+    "adapter": "EmGJDPvwSx6kU4KijWGh8uqRNj3BJXNjcWQyCmfKv7WL",
+    "qualification": "6WWnYWwsuYNPDruPJEsqJKekv9mN9NP2mCEU6XJ7qfWs",
+}
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 ACTIONS_RUN_RE = re.compile(r"^https://github\.com/[^/]+/[^/]+/actions/runs/[0-9]+(?:/.*)?$")
+BASE58_RE = r"[1-9A-HJ-NP-Za-km-z]+"
 
 
 def extract(pattern: str, text: str, label: str) -> str:
@@ -32,6 +45,34 @@ def extract(pattern: str, text: str, label: str) -> str:
     if not m:
         raise RuntimeError(f"cannot parse {label}")
     return m.group(1)
+
+
+def extract_declare_id(text: str, label: str) -> str:
+    return extract(rf'declare_id!\("({BASE58_RE})"\)', text, label)
+
+
+def extract_pubkey_macro(name: str, text: str, label: str) -> str:
+    return extract(
+        rf'{re.escape(name)}: Pubkey = pubkey!\("({BASE58_RE})"\)',
+        text,
+        label,
+    )
+
+
+def extract_frozen_binding(name: str, text: str, label: str) -> str | None:
+    m = re.search(
+        rf'{re.escape(name)}: Pubkey = pubkey!\("({BASE58_RE})"\)',
+        text,
+    )
+    if m:
+        return m.group(1)
+    zero = re.search(
+        rf'{re.escape(name)}: Pubkey = Pubkey::new_from_array\(\[0u8; 32\]\)',
+        text,
+    )
+    if zero:
+        return None
+    raise RuntimeError(f"cannot parse {label}")
 
 
 def sha256_file(path: Path) -> str:
@@ -68,76 +109,166 @@ def tracked_secret_candidates() -> list[str]:
     return bad
 
 
+def require_sha256(blockers: list[str], manifest: dict, key: str) -> str | None:
+    value = manifest.get(key)
+    if not value:
+        blockers.append(f"release manifest field not frozen: {key}")
+        return None
+    value = str(value)
+    if not SHA256_RE.fullmatch(value):
+        blockers.append(f"release manifest {key} is not a lowercase SHA-256 digest")
+        return None
+    return value
+
+
 def main() -> int:
     blockers: list[str] = []
     notes: list[str] = []
 
-    constants = CONSTANTS.read_text()
-    lib = LIB.read_text()
-    anchor = ANCHOR.read_text()
+    core_constants = CORE_CONSTANTS.read_text()
+    core_lib = CORE_LIB.read_text()
+    adapter_lib = ADAPTER_LIB.read_text()
+    qualification_lib = QUALIFICATION_LIB.read_text()
+    anchor_text = ANCHOR.read_text()
 
-    source_program_id = extract(
-        r'declare_id!\("([1-9A-HJ-NP-Za-km-z]+)"\)', lib, "declare_id"
+    referral_program_id = extract_declare_id(core_lib, "referral declare_id")
+    adapter_program_id = extract_declare_id(adapter_lib, "adapter declare_id")
+    qualification_program_id = extract_declare_id(
+        qualification_lib, "qualification declare_id"
     )
-    treasury = extract(
-        r'MAINNET_SERVICE_TREASURY: Pubkey = pubkey!\("([1-9A-HJ-NP-Za-km-z]+)"\)',
-        constants,
-        "mainnet treasury",
+
+    treasury = extract_pubkey_macro(
+        "MAINNET_SERVICE_TREASURY", core_constants, "mainnet treasury"
     )
-    usdt = extract(
-        r'MAINNET_USDT_MINT: Pubkey = pubkey!\("([1-9A-HJ-NP-Za-km-z]+)"\)',
-        constants,
-        "USDT mint",
-    )
-    usdc = extract(
-        r'MAINNET_USDC_MINT: Pubkey = pubkey!\("([1-9A-HJ-NP-Za-km-z]+)"\)',
-        constants,
-        "USDC mint",
-    )
-    revenue_source = extract(
-        r'MAINNET_QUALIFIED_REVENUE_SOURCE: Pubkey = pubkey!\("([1-9A-HJ-NP-Za-km-z]+)"\)',
-        constants,
+    usdt = extract_pubkey_macro("MAINNET_USDT_MINT", core_constants, "USDT mint")
+    usdc = extract_pubkey_macro("MAINNET_USDC_MINT", core_constants, "USDC mint")
+    revenue_source = extract_pubkey_macro(
+        "MAINNET_QUALIFIED_REVENUE_SOURCE",
+        core_constants,
         "qualified revenue source",
     )
     registration_open = int(
         extract(
-            r'MAINNET_REGISTRATION_OPEN_AT: i64 = (-?\d+)',
-            constants,
+            r"MAINNET_REGISTRATION_OPEN_AT: i64 = (-?\d+)",
+            core_constants,
             "registration open timestamp",
         )
     )
 
+    adapter_referral_binding = extract_frozen_binding(
+        "MAINNET_REFERRAL_PROGRAM",
+        adapter_lib,
+        "adapter referral production binding",
+    )
+    adapter_qualification_binding = extract_frozen_binding(
+        "MAINNET_QUALIFICATION_PROGRAM",
+        adapter_lib,
+        "adapter qualification production binding",
+    )
+    adapter_usdt = extract_pubkey_macro(
+        "MAINNET_USDT_MINT", adapter_lib, "adapter USDT mint"
+    )
+    adapter_usdc = extract_pubkey_macro(
+        "MAINNET_USDC_MINT", adapter_lib, "adapter USDC mint"
+    )
+    qualification_adapter_binding = extract_frozen_binding(
+        "MAINNET_ADAPTER_PROGRAM",
+        qualification_lib,
+        "qualification adapter production binding",
+    )
+    qualification_usdt = extract_pubkey_macro(
+        "MAINNET_USDT_MINT", qualification_lib, "qualification USDT mint"
+    )
+    qualification_usdc = extract_pubkey_macro(
+        "MAINNET_USDC_MINT", qualification_lib, "qualification USDC mint"
+    )
+
     if treasury != EXPECTED["service_treasury"]:
         blockers.append(f"treasury mismatch: {treasury}")
-    if usdt != EXPECTED["usdt_mint"]:
-        blockers.append(f"USDT mint mismatch: {usdt}")
-    if usdc != EXPECTED["usdc_mint"]:
-        blockers.append(f"USDC mint mismatch: {usdc}")
+    for label, value in [
+        ("core USDT", usdt),
+        ("adapter USDT", adapter_usdt),
+        ("qualification USDT", qualification_usdt),
+    ]:
+        if value != EXPECTED["usdt_mint"]:
+            blockers.append(f"{label} mint mismatch: {value}")
+    for label, value in [
+        ("core USDC", usdc),
+        ("adapter USDC", adapter_usdc),
+        ("qualification USDC", qualification_usdc),
+    ]:
+        if value != EXPECTED["usdc_mint"]:
+            blockers.append(f"{label} mint mismatch: {value}")
 
-    if source_program_id == DEVELOPMENT_PROGRAM_ID:
-        blockers.append("Program ID is still the development identity")
+    final_ids = {
+        "referral": referral_program_id,
+        "adapter": adapter_program_id,
+        "qualification": qualification_program_id,
+    }
+    for name, program_id in final_ids.items():
+        if program_id == DEVELOPMENT_IDS[name]:
+            blockers.append(f"{name} Program ID is still the development identity")
+    if len(set(final_ids.values())) != 3:
+        blockers.append("referral, adapter and qualification Program IDs must be distinct")
 
-    if revenue_source == SENTINEL_SOURCE:
+    if adapter_referral_binding is None:
+        blockers.append("adapter MAINNET_REFERRAL_PROGRAM is still fail-closed")
+    elif adapter_referral_binding != referral_program_id:
+        blockers.append("adapter MAINNET_REFERRAL_PROGRAM does not match referral Program ID")
+
+    if adapter_qualification_binding is None:
+        blockers.append("adapter MAINNET_QUALIFICATION_PROGRAM is still fail-closed")
+    elif adapter_qualification_binding != qualification_program_id:
+        blockers.append(
+            "adapter MAINNET_QUALIFICATION_PROGRAM does not match qualification Program ID"
+        )
+
+    if qualification_adapter_binding is None:
+        blockers.append("qualification MAINNET_ADAPTER_PROGRAM is still fail-closed")
+    elif qualification_adapter_binding != adapter_program_id:
+        blockers.append(
+            "qualification MAINNET_ADAPTER_PROGRAM does not match adapter Program ID"
+        )
+
+    if revenue_source == SENTINEL_PUBKEY:
         blockers.append("qualified revenue source is still the fail-closed sentinel")
     else:
-        if revenue_source == treasury:
-            blockers.append("qualified revenue source must not equal the service treasury")
-        if revenue_source == source_program_id:
-            blockers.append("qualified revenue source must not equal the referral Program ID")
+        forbidden_sources = {
+            treasury,
+            referral_program_id,
+            adapter_program_id,
+            qualification_program_id,
+        }
+        if revenue_source in forbidden_sources:
+            blockers.append(
+                "qualified revenue source must be the adapter Revenue Authority PDA, not a treasury or Program ID"
+            )
 
     if registration_open <= 0:
         blockers.append("registration_open_at is not frozen to a positive UTC unix timestamp")
     elif registration_open <= int(time.time()):
         blockers.append("registration_open_at is not in the future")
 
-    mainnet_match = re.search(
-        r'\[programs\.mainnet\][\s\S]*?service_referral_protocol\s*=\s*"([1-9A-HJ-NP-Za-km-z]+)"',
-        anchor,
-    )
-    if not mainnet_match:
-        blockers.append("Anchor.toml has no [programs.mainnet] Program ID")
-    elif mainnet_match.group(1) != source_program_id:
-        blockers.append("Anchor.toml mainnet Program ID does not match declare_id!")
+    try:
+        anchor = tomllib.loads(anchor_text)
+        mainnet = anchor.get("programs", {}).get("mainnet", {})
+    except Exception as exc:
+        blockers.append(f"Anchor.toml cannot be parsed: {exc}")
+        mainnet = {}
+
+    anchor_expected = {
+        "service_referral_protocol": referral_program_id,
+        "revenue_adapter": adapter_program_id,
+        "revenue_qualification": qualification_program_id,
+    }
+    for name, expected in anchor_expected.items():
+        actual = mainnet.get(name)
+        if not actual:
+            blockers.append(f"Anchor.toml [programs.mainnet] missing {name}")
+        elif actual != expected:
+            blockers.append(
+                f"Anchor.toml mainnet {name} does not match source declare_id!"
+            )
 
     tracked = tracked_secret_candidates()
     if tracked:
@@ -164,27 +295,30 @@ def main() -> int:
             blockers.append(f"release manifest is invalid JSON: {exc}")
             manifest = {}
 
-        required = [
+        required_scalar = [
             "commit_sha",
-            "program_id",
+            "referral_program_id",
+            "revenue_adapter_program_id",
+            "revenue_qualification_program_id",
             "qualified_revenue_source",
             "registration_open_at",
             "service_treasury",
             "usdt_mint",
             "usdc_mint",
-            "so_sha256",
-            "audit_report_sha256",
             "verified_build_run_url",
             "audit_status",
+            "qualification_evidence_status",
             "smoke_test_plan_approved",
         ]
-        for key in required:
+        for key in required_scalar:
             value = manifest.get(key)
             if value in (None, "", 0, False):
                 blockers.append(f"release manifest field not frozen: {key}")
 
         expected_manifest = {
-            "program_id": source_program_id,
+            "referral_program_id": referral_program_id,
+            "revenue_adapter_program_id": adapter_program_id,
+            "revenue_qualification_program_id": qualification_program_id,
             "qualified_revenue_source": revenue_source,
             "registration_open_at": registration_open,
             **EXPECTED,
@@ -197,13 +331,38 @@ def main() -> int:
         if git_head and manifest_commit != git_head:
             blockers.append("release manifest commit_sha does not match current git HEAD")
 
-        so_hash = manifest.get("so_sha256")
-        if so_hash and not SHA256_RE.fullmatch(str(so_hash)):
-            blockers.append("release manifest so_sha256 is not a lowercase SHA-256 digest")
+        artifact_hashes: dict[str, str | None] = {}
+        for hash_field, artifact in ARTIFACTS.items():
+            expected_hash = require_sha256(blockers, manifest, hash_field)
+            artifact_hashes[hash_field] = expected_hash
+            if not artifact.exists():
+                blockers.append(f"production artifact is missing: {artifact.relative_to(ROOT)}")
+            elif expected_hash:
+                actual_hash = sha256_file(artifact)
+                if actual_hash != expected_hash:
+                    blockers.append(
+                        f"{artifact.name} SHA-256 does not match release manifest"
+                    )
+                else:
+                    notes.append(f"artifact SHA-256 verified: {artifact.name} {actual_hash}")
 
-        audit_hash = manifest.get("audit_report_sha256")
-        if audit_hash and not SHA256_RE.fullmatch(str(audit_hash)):
-            blockers.append("release manifest audit_report_sha256 is not a lowercase SHA-256 digest")
+        audit_hash = require_sha256(blockers, manifest, "audit_report_sha256")
+        qualification_spec_hash = require_sha256(
+            blockers, manifest, "qualification_evidence_spec_sha256"
+        )
+        if qualification_spec_hash:
+            if not QUALIFICATION_SPEC.exists():
+                blockers.append("QUALIFIED_REVENUE_SOURCE_SPEC.md is missing")
+            else:
+                actual_spec_hash = sha256_file(QUALIFICATION_SPEC)
+                if actual_spec_hash != qualification_spec_hash:
+                    blockers.append(
+                        "qualification evidence spec SHA-256 does not match repository spec"
+                    )
+                else:
+                    notes.append(
+                        f"qualification evidence spec SHA-256 verified: {actual_spec_hash}"
+                    )
 
         verified_build_url = manifest.get("verified_build_run_url")
         if verified_build_url and not ACTIONS_RUN_RE.fullmatch(str(verified_build_url)):
@@ -211,25 +370,22 @@ def main() -> int:
 
         if manifest.get("audit_status") != "passed":
             blockers.append("independent audit status is not 'passed'")
+        if manifest.get("qualification_evidence_status") != "approved":
+            blockers.append("qualified revenue evidence model is not 'approved'")
         if manifest.get("smoke_test_plan_approved") is not True:
             blockers.append("mainnet smoke-test plan is not approved")
 
-        if not ARTIFACT.exists():
-            blockers.append("production .so is missing; exact artifact verification is mandatory")
-        elif so_hash and SHA256_RE.fullmatch(str(so_hash)):
-            actual = sha256_file(ARTIFACT)
-            if actual != so_hash:
-                blockers.append("local production .so SHA-256 does not match release manifest")
-            else:
-                notes.append(f"artifact SHA-256 verified: {actual}")
+        _ = (artifact_hashes, audit_hash)
 
-    print("=== PRE-MAINNET GATE ===")
-    print(f"Program ID: {source_program_id}")
-    print(f"Treasury:   {treasury}")
-    print(f"USDT mint:  {usdt}")
-    print(f"USDC mint:  {usdc}")
-    print(f"Revenue:    {revenue_source}")
-    print(f"Open UTC:   {registration_open}")
+    print("=== PRE-MAINNET THREE-PROGRAM GATE ===")
+    print(f"Referral ID:      {referral_program_id}")
+    print(f"Adapter ID:       {adapter_program_id}")
+    print(f"Qualification ID: {qualification_program_id}")
+    print(f"Treasury:         {treasury}")
+    print(f"USDT mint:        {usdt}")
+    print(f"USDC mint:        {usdc}")
+    print(f"Revenue source:   {revenue_source}")
+    print(f"Open UTC:         {registration_open}")
     for note in notes:
         print(f"NOTE  {note}")
 
@@ -241,8 +397,9 @@ def main() -> int:
 
     print("RESULT: READY FOR CONTROLLED MAINNET DEPLOYMENT")
     print(
-        "WARNING: this does NOT authorize removal of upgrade authority. "
-        "Finalization comes only after bytecode verification and limited mainnet smoke tests."
+        "WARNING: this does NOT authorize removal of any upgrade authority. "
+        "Finalization comes only after all three deployed bytecodes are verified "
+        "and the limited mainnet smoke plan passes."
     )
     return 0
 
