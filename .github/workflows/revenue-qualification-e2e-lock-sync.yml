@@ -1,5 +1,5 @@
 name: revenue-qualification-e2e-lock-sync
-# Fresh run after switching the E2E fixture to LiteSVM's locked Clock sysvar API.
+# Fresh run after rotating LiteSVM blockhash before the identical replay funding helper transaction.
 on:
   push:
     branches: [agent/revenue-qualification-e2e]
