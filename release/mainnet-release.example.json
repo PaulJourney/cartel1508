@@ -4,6 +4,7 @@
   "revenue_adapter_program_id": "<FINAL_REVENUE_ADAPTER_PROGRAM_ID>",
   "revenue_qualification_program_id": "<FINAL_REVENUE_QUALIFICATION_PROGRAM_ID>",
   "qualified_revenue_source": "<FINAL_ADAPTER_REVENUE_AUTHORITY_PDA>",
+  "qualification_authority": "<FINAL_QUALIFICATION_AUTHORITY_PDA>",
   "registration_open_at": 0,
   "service_treasury": "AepYo8xanmKuRiLVeYQuCTJoQr1nyKiTApoKwHMEg8fn",
   "usdt_mint": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
