@@ -1,0 +1,43 @@
+name: revenue-qualification-e2e-lock-sync
+on:
+  push:
+    branches: [agent/revenue-qualification-e2e]
+concurrency:
+  group: revenue-qualification-e2e-lock-sync
+  cancel-in-progress: true
+permissions:
+  contents: write
+jobs:
+  e2e-lock-and-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/revenue-qualification-e2e
+      - uses: solana-foundation/github-actions/setup-all@v0.2.15
+        with:
+          solana_version: '3.1.10'
+          anchor_version: '1.1.2'
+          node_version: '24'
+      - run: cargo-build-sbf --install-only
+      - name: Build deployable protocol stack
+        run: anchor build --ignore-keys
+      - name: Build locked test evidence fixture
+        run: |
+          mkdir -p target/deploy
+          cd integration-tests/fixtures/evidence_stub
+          cargo build-sbf --sbf-out-dir ../../../target/deploy -- --locked
+          test -s ../../../target/deploy/test_revenue_evidence_stub.so
+      - name: Sync integration dependency lock
+        run: cargo generate-lockfile --manifest-path integration-tests/Cargo.toml
+      - name: Run four-program LiteSVM E2E
+        run: cargo test --locked --manifest-path integration-tests/Cargo.toml --test qualified_revenue_e2e -- --nocapture
+      - name: Commit integration lock and remove temporary workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add integration-tests/Cargo.lock
+          git rm .github/workflows/revenue-qualification-e2e-lock-sync.yml
+          git commit -m 'lock qualified revenue E2E dependencies'
+          git push origin HEAD:agent/revenue-qualification-e2e
