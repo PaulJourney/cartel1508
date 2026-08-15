@@ -12,17 +12,28 @@ jobs:
           solana_version: '3.1.10'
           anchor_version: '1.1.2'
           node_version: '24'
-      - name: Verifiable production build
-        working-directory: programs/service_referral_protocol
+      - name: Verify locked production graph before Docker build
+        run: cargo check --locked --workspace --features production
+      - name: Verifiable three-program production build
         run: anchor build --verifiable --ignore-keys -- --features production
-      - name: Hash verifiable artifact
-        run: sha256sum target/verifiable/service_referral_protocol.so | tee target/verifiable/service_referral_protocol.so.sha256
+      - name: Require and hash all verifiable artifacts
+        run: |
+          test -s target/verifiable/service_referral_protocol.so
+          test -s target/verifiable/revenue_adapter.so
+          test -s target/verifiable/revenue_qualification.so
+          sha256sum target/verifiable/service_referral_protocol.so | tee target/verifiable/service_referral_protocol.so.sha256
+          sha256sum target/verifiable/revenue_adapter.so | tee target/verifiable/revenue_adapter.so.sha256
+          sha256sum target/verifiable/revenue_qualification.so | tee target/verifiable/revenue_qualification.so.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: anchor-verifiable-v0.10-production
+          name: anchor-verifiable-three-program-production
           path: |
             target/verifiable/service_referral_protocol.so
             target/verifiable/service_referral_protocol.so.sha256
+            target/verifiable/revenue_adapter.so
+            target/verifiable/revenue_adapter.so.sha256
+            target/verifiable/revenue_qualification.so
+            target/verifiable/revenue_qualification.so.sha256
             target/idl/*.json
             Cargo.lock
           if-no-files-found: error
