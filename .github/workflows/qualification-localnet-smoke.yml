@@ -1,0 +1,170 @@
+name: qualification-localnet-smoke
+on:
+  push:
+    branches: [agent/revenue-adapter-v0.1]
+    paths:
+      - 'programs/service_referral_protocol/**'
+      - 'programs/revenue_adapter/**'
+      - 'programs/revenue_qualification/**'
+      - 'scripts/qualification-localnet-smoke.mjs'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Anchor.toml'
+      - 'package.json'
+      - '.github/workflows/qualification-localnet-smoke.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  three-program-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: solana-foundation/github-actions/setup-all@v0.2.15
+        with:
+          solana_version: '3.1.10'
+          anchor_version: '1.1.2'
+          node_version: '24'
+      - run: cargo-build-sbf --install-only
+
+      - name: Generate ephemeral three-program identities
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/qualification-smoke-keys
+          solana-keygen new --no-bip39-passphrase --silent --force -o /tmp/qualification-smoke-keys/referral.json
+          solana-keygen new --no-bip39-passphrase --silent --force -o /tmp/qualification-smoke-keys/adapter.json
+          solana-keygen new --no-bip39-passphrase --silent --force -o /tmp/qualification-smoke-keys/qualification.json
+          REFERRAL_PROGRAM_ID="$(solana-keygen pubkey /tmp/qualification-smoke-keys/referral.json)"
+          ADAPTER_PROGRAM_ID="$(solana-keygen pubkey /tmp/qualification-smoke-keys/adapter.json)"
+          QUALIFICATION_PROGRAM_ID="$(solana-keygen pubkey /tmp/qualification-smoke-keys/qualification.json)"
+          echo "REFERRAL_PROGRAM_ID=$REFERRAL_PROGRAM_ID" >> "$GITHUB_ENV"
+          echo "ADAPTER_PROGRAM_ID=$ADAPTER_PROGRAM_ID" >> "$GITHUB_ENV"
+          echo "QUALIFICATION_PROGRAM_ID=$QUALIFICATION_PROGRAM_ID" >> "$GITHUB_ENV"
+          printf 'referral=%s\nadapter=%s\nqualification=%s\n' \
+            "$REFERRAL_PROGRAM_ID" "$ADAPTER_PROGRAM_ID" "$QUALIFICATION_PROGRAM_ID" \
+            | tee /tmp/qualification-program-ids.txt
+
+      - name: Freeze ephemeral identities into test build
+        run: |
+          python3 - "$REFERRAL_PROGRAM_ID" "$ADAPTER_PROGRAM_ID" "$QUALIFICATION_PROGRAM_ID" <<'PY'
+          from pathlib import Path
+          import sys
+
+          replacements = {
+              '4AuoBkj4vkH2K1jwUuECtVBqF6Q74efjGbaw7btuNjRV': sys.argv[1],
+              'EmGJDPvwSx6kU4KijWGh8uqRNj3BJXNjcWQyCmfKv7WL': sys.argv[2],
+              '6WWnYWwsuYNPDruPJEsqJKekv9mN9NP2mCEU6XJ7qfWs': sys.argv[3],
+          }
+          files = [Path('Anchor.toml'), *Path('programs').rglob('*.rs')]
+          counts = {old: 0 for old in replacements}
+          for path in files:
+              text = path.read_text()
+              changed = text
+              for old, new in replacements.items():
+                  n = changed.count(old)
+                  if n:
+                      counts[old] += n
+                      changed = changed.replace(old, new)
+              if changed != text:
+                  path.write_text(changed)
+          missing = [old for old, count in counts.items() if count == 0]
+          if missing:
+              raise SystemExit(f'expected development IDs were not found: {missing}')
+          print('ephemeral identity replacement counts:', counts)
+          PY
+
+      - name: Verify locked graph and build three programs
+        run: |
+          cargo check --locked --workspace
+          anchor build --ignore-keys
+          test -s target/deploy/service_referral_protocol.so
+          test -s target/deploy/revenue_adapter.so
+          test -s target/deploy/revenue_qualification.so
+          test -s target/idl/service_referral_protocol.json
+          test -s target/idl/revenue_adapter.json
+          test -s target/idl/revenue_qualification.json
+          sha256sum \
+            target/deploy/service_referral_protocol.so \
+            target/deploy/revenue_adapter.so \
+            target/deploy/revenue_qualification.so \
+            | tee /tmp/qualification-artifact-hashes.txt
+
+      - name: Start isolated Solana validator
+        run: |
+          set -euo pipefail
+          solana-keygen new --no-bip39-passphrase --silent --force -o ~/.config/solana/id.json
+          solana-test-validator --reset --quiet > /tmp/qualification-validator.log 2>&1 &
+          echo $! > /tmp/qualification-validator.pid
+          ready=0
+          for _ in $(seq 1 60); do
+            if solana cluster-version --url localhost >/tmp/qualification-cluster-version.txt 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" != "1" ]; then
+            cat /tmp/qualification-validator.log
+            exit 1
+          fi
+          solana config set --url localhost
+          solana airdrop 100 --url localhost
+          solana balance --url localhost | tee /tmp/qualification-start-balance.txt
+
+      - name: Deploy all three programs to isolated validator
+        run: |
+          set -euo pipefail
+          solana program deploy target/deploy/service_referral_protocol.so \
+            --program-id /tmp/qualification-smoke-keys/referral.json \
+            --url localhost | tee /tmp/qualification-referral-deploy.txt
+          solana program deploy target/deploy/revenue_adapter.so \
+            --program-id /tmp/qualification-smoke-keys/adapter.json \
+            --url localhost | tee /tmp/qualification-adapter-deploy.txt
+          solana program deploy target/deploy/revenue_qualification.so \
+            --program-id /tmp/qualification-smoke-keys/qualification.json \
+            --url localhost | tee /tmp/qualification-qualification-deploy.txt
+          solana program show "$REFERRAL_PROGRAM_ID" --url localhost > /tmp/qualification-referral-show.txt
+          solana program show "$ADAPTER_PROGRAM_ID" --url localhost > /tmp/qualification-adapter-show.txt
+          solana program show "$QUALIFICATION_PROGRAM_ID" --url localhost > /tmp/qualification-qualification-show.txt
+
+      - name: Execute real three-program atomic transactions
+        env:
+          ANCHOR_PROVIDER_URL: http://127.0.0.1:8899
+          ANCHOR_WALLET: ~/.config/solana/id.json
+          REFERRAL_IDL: target/idl/service_referral_protocol.json
+          ADAPTER_IDL: target/idl/revenue_adapter.json
+          QUALIFICATION_IDL: target/idl/revenue_qualification.json
+        run: |
+          npm install --no-audit --no-fund --ignore-scripts
+          node scripts/qualification-localnet-smoke.mjs | tee /tmp/qualification-transaction-smoke.txt
+          grep -q 'QUALIFICATION LOCALNET SMOKE: PASS' /tmp/qualification-transaction-smoke.txt
+
+      - name: Record final validator evidence
+        if: always()
+        run: |
+          solana balance --url localhost > /tmp/qualification-end-balance.txt 2>&1 || true
+          if [ -f /tmp/qualification-validator.pid ]; then
+            kill "$(cat /tmp/qualification-validator.pid)" 2>/dev/null || true
+          fi
+
+      - name: Publish non-secret qualification smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualification-localnet-smoke-evidence
+          path: |
+            /tmp/qualification-program-ids.txt
+            /tmp/qualification-artifact-hashes.txt
+            /tmp/qualification-cluster-version.txt
+            /tmp/qualification-start-balance.txt
+            /tmp/qualification-end-balance.txt
+            /tmp/qualification-referral-deploy.txt
+            /tmp/qualification-adapter-deploy.txt
+            /tmp/qualification-qualification-deploy.txt
+            /tmp/qualification-referral-show.txt
+            /tmp/qualification-adapter-show.txt
+            /tmp/qualification-qualification-show.txt
+            /tmp/qualification-transaction-smoke.txt
+            /tmp/qualification-validator.log
+          if-no-files-found: warn
