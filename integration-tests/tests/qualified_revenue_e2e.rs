@@ -390,6 +390,10 @@ fn verified_evidence_chain_is_collateralized_atomic_and_replay_safe() {
     // Re-fund source so a replay reaches the adapter receipt boundary instead of
     // failing early on collateralization. Duplicate event must leave all balances
     // and liabilities unchanged.
+    // The replay re-fund is byte-for-byte identical to the earlier mint. Rotate
+    // LiteSVM's recent blockhash first so the helper transaction is not rejected
+    // as AlreadyProcessed before the protocol replay check is reached.
+    ctx.svm.expire_blockhash();
     ctx.svm
         .mint_to(
             &usdc_mint.pubkey(),
@@ -398,7 +402,6 @@ fn verified_evidence_chain_is_collateralized_atomic_and_replay_safe() {
             revenue_amount,
         )
         .expect("re-fund for replay test");
-    ctx.svm.expire_blockhash();
 
     let replay = evidence
         .accounts(test_revenue_evidence_stub::accounts::ReplayExisting {
