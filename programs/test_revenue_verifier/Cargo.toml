@@ -1,0 +1,27 @@
+[package]
+name = "test_revenue_verifier"
+version = "0.1.0"
+description = "TEST ONLY verifier used to prove Revenue Adapter PDA authorization"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "test_revenue_verifier"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "revenue_adapter/idl-build"]
+# Deliberately fatal: this program is an adversarial-test fixture, never production code.
+production = []
+
+[dependencies]
+anchor-lang = "=1.1.2"
+revenue_adapter = { path = "../revenue_adapter", features = ["cpi"] }
+
+[workspace]
+resolver = "2"
