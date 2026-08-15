@@ -1,50 +1,73 @@
-# Revenue Qualification Program — Security Boundary
+# Revenue Qualification Gateway — Security Boundary
 
 ## Purpose
 
 `revenue_qualification` is the only component allowed to sign as the deterministic `qualified-revenue-authority` PDA accepted by `revenue_adapter`.
 
-Its job is deliberately narrow: a revenue event becomes qualified only when a real supported stablecoin payment is transferred from the payer's canonical SPL token account to the adapter revenue-authority canonical token account in the same Solana transaction that records and distributes the event.
+It deliberately does **not** decide by itself that a human-funded transfer is genuine external revenue. Doing so would let an operator or attacker fabricate a commission-bearing event simply by supplying funds, which violates the frozen qualified-revenue trust model.
 
-## Atomic flow
+Instead, the gateway accepts an event only when an independently reviewed immutable **evidence program** invokes it through CPI and signs with that program's deterministic `revenue-evidence-authority` PDA.
 
-1. The payer signs the transaction.
-2. The program validates a non-zero event ID and amount.
-3. The payer source must be the canonical SPL ATA owned by the payer.
-4. The mint must be one of the two immutable configured stablecoins.
-5. The destination must be the canonical SPL ATA owned by the adapter `revenue-authority` PDA.
-6. The stablecoin payment is transferred to that destination.
-7. The qualification program signs a CPI with its `qualified-revenue-authority` PDA into `revenue_adapter`.
-8. The adapter creates the deterministic event receipt and signs its own CPI into `service_referral_protocol`.
-9. The referral protocol transfers the funded revenue into its vault and applies the immutable split/accounting rules.
+## Frozen evidence interface
 
-All steps occur in one transaction. Failure at any downstream stage rolls back the payer transfer, adapter receipt and referral accounting.
+For event ID `E`, the evidence program must own the canonical PDA:
+
+`["revenue-evidence", E]`
+
+The account serializes `RevenueEvidenceV1` containing:
+
+- evidence version;
+- event ID;
+- qualification Program ID;
+- adapter Program ID;
+- adapter revenue-authority PDA;
+- beneficiary;
+- stablecoin mint;
+- gross amount;
+- settled timestamp;
+- non-zero external reference/hash.
+
+The qualification gateway checks every field against the runtime accounts and its immutable configuration.
+
+## Authorization chain
+
+1. The separately audited evidence program determines whether a real external revenue event satisfies the product-specific rules.
+2. That evidence program owns the deterministic evidence PDA and is the only program capable of signing as its `revenue-evidence-authority` PDA.
+3. Through CPI, the evidence program calls `revenue_qualification::qualify_verified_evidence`.
+4. The qualification gateway validates the evidence PDA, owner, version, event fields, mint, beneficiary, amount and binding to the exact qualification/adapter/revenue-authority identities.
+5. It verifies that the adapter revenue-authority canonical USDC/USDT ATA is already funded for at least the evidenced amount.
+6. The qualification gateway signs a CPI with its own `qualified-revenue-authority` PDA into `revenue_adapter`.
+7. The adapter creates the deterministic event receipt and signs as its `revenue-authority` PDA into `service_referral_protocol`.
+8. The referral protocol transfers the gross stablecoin amount into its vault before applying the immutable 50/43/2/5 accounting.
+
+If the evidence program funds/creates evidence and invokes this chain in one transaction, any downstream failure rolls the entire transaction back atomically.
 
 ## Trust properties
 
-- No private key exists for the qualification-authority PDA.
-- No private key exists for the adapter revenue-authority PDA.
-- There is no admin instruction capable of minting, attesting or manually qualifying arbitrary revenue.
-- Configuration is a deterministic initialize-once PDA.
-- The adapter Program ID and adapter config PDA are frozen at initialization.
-- The adapter config must be owned by the adapter program.
-- Supported stablecoin identities are frozen at initialization.
-- Production builds additionally require reviewed mainnet identities and fail closed while the adapter Program ID remains the sentinel.
-- The downstream adapter retains deterministic receipt anti-replay by `event_id`.
+- A normal wallet cannot sign as the evidence-authority PDA.
+- A normal wallet cannot sign as the qualification-authority PDA.
+- A normal wallet cannot sign as the adapter revenue-authority PDA.
+- The rent payer used for the adapter receipt has no authority to qualify an event.
+- There is no admin/update instruction in the qualification gateway.
+- The evidence Program ID, adapter Program ID, their canonical PDAs and supported stablecoin identities are frozen at initialize-once configuration.
+- The downstream adapter retains deterministic anti-replay using one `RevenueReceipt` PDA per event ID.
+- Service-unit/activity purchases remain outside this path.
 
-## What this proves
+## Remaining product-specific dependency
 
-The qualification program proves an on-chain fact: an exact amount of an allowed SPL stablecoin was authorized by the payer and moved into the protocol revenue pipeline in the same atomic execution.
+This gateway intentionally does not invent the external evidence semantics. The final evidence program must correspond to the real source of qualified service revenue and must be independently reviewed. Examples of questions that belong there include what business event constitutes earned revenue, how a beneficiary is attributed and what makes an external settlement final.
 
-It does **not** claim to prove off-chain facts such as delivery of a physical good, legal entitlement, identity, chargeback status on another payment rail or the truth of an external oracle. Those would require a separately reviewed trust model and must not be silently added to this program.
+Until that concrete evidence program exists and is reviewed, `MAINNET_EVIDENCE_PROGRAM` remains the default sentinel and a production build cannot initialize.
 
 ## Mainnet freeze requirements
 
-Before a production build can initialize:
+Before production initialization:
 
-- replace `MAINNET_ADAPTER_PROGRAM` sentinel with the final reviewed adapter Program ID;
+- finalize and audit the evidence program and its qualification semantics;
+- freeze `MAINNET_EVIDENCE_PROGRAM` to that exact Program ID;
+- freeze `MAINNET_ADAPTER_PROGRAM` to the reviewed adapter Program ID;
 - verify USDT and USDC mint identities;
-- build all three programs reproducibly from the same frozen commit;
-- verify bytecode hashes and independent audit evidence;
-- initialize in dependency order: referral protocol, revenue adapter, qualification program;
-- run limited mainnet smoke tests before removing any upgrade authorities.
+- rebuild all components reproducibly from the frozen commit;
+- verify artifact hashes and independent audit evidence;
+- initialize in dependency order and run controlled mainnet smoke tests;
+- remove upgrade authorities only after deployed bytecode and runtime behavior are verified.
