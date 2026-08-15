@@ -1,0 +1,23 @@
+[package]
+name = "revenue_qualification"
+version = "0.1.0"
+description = "Immutable stablecoin payment qualification program for the referral revenue pipeline"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "revenue_qualification"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build", "revenue_adapter/idl-build"]
+production = []
+
+[dependencies]
+anchor-lang = "=1.1.2"
+anchor-spl = { version = "=1.1.2", features = ["token", "associated_token"] }
+revenue_adapter = { path = "../revenue_adapter", features = ["cpi"] }
