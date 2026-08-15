@@ -1,0 +1,27 @@
+[package]
+name = "test_revenue_evidence_stub"
+version = "0.1.0"
+description = "TEST-ONLY immutable evidence fixture for the qualified revenue CPI chain"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "test_revenue_evidence_stub"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build", "revenue_qualification/idl-build"]
+
+[dependencies]
+anchor-lang = "=1.1.2"
+anchor-spl = { version = "=1.1.2", features = ["token"] }
+revenue_qualification = { path = "../../../programs/revenue_qualification", features = ["cpi"] }
+
+# Keep this fixture out of the deployable repository workspace. It exists only
+# to exercise PDA/CPI mechanics in LiteSVM integration tests.
+[workspace]
