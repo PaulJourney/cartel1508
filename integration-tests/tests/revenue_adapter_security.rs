@@ -71,26 +71,25 @@ fn initialize_freezes_config_once_with_deterministic_pdas() {
     let (revenue_authority, revenue_authority_bump) =
         Pubkey::find_program_address(&[REVENUE_AUTHORITY_SEED], &revenue_adapter::ID);
 
-    let build_initialize = || {
-        ctx.program()
-            .accounts(revenue_adapter::accounts::Initialize {
-                initializer: initializer.pubkey(),
-                config,
-                revenue_authority,
-                qualification_authority,
-                system_program: anchor_lang::system_program::ID,
-            })
-            .args(revenue_adapter::instruction::Initialize {
-                referral_program: service_referral_protocol::ID,
-                qualification_program,
-                usdt_mint,
-                usdc_mint,
-            })
-            .instruction()
-            .expect("build adapter initialize")
-    };
+    let first_ix = ctx
+        .program()
+        .accounts(revenue_adapter::accounts::Initialize {
+            initializer: initializer.pubkey(),
+            config,
+            revenue_authority,
+            qualification_authority,
+            system_program: anchor_lang::system_program::ID,
+        })
+        .args(revenue_adapter::instruction::Initialize {
+            referral_program: service_referral_protocol::ID,
+            qualification_program,
+            usdt_mint,
+            usdc_mint,
+        })
+        .instruction()
+        .expect("build first adapter initialize");
 
-    ctx.execute_instruction(build_initialize(), &[&initializer])
+    ctx.execute_instruction(first_ix, &[&initializer])
         .expect("execute first initialize")
         .assert_success();
 
@@ -108,8 +107,26 @@ fn initialize_freezes_config_once_with_deterministic_pdas() {
     assert_eq!(frozen.usdc_mint, usdc_mint);
 
     ctx.svm.expire_blockhash();
+    let second_ix = ctx
+        .program()
+        .accounts(revenue_adapter::accounts::Initialize {
+            initializer: initializer.pubkey(),
+            config,
+            revenue_authority,
+            qualification_authority,
+            system_program: anchor_lang::system_program::ID,
+        })
+        .args(revenue_adapter::instruction::Initialize {
+            referral_program: service_referral_protocol::ID,
+            qualification_program,
+            usdt_mint,
+            usdc_mint,
+        })
+        .instruction()
+        .expect("build second adapter initialize");
+
     let second = ctx
-        .execute_instruction(build_initialize(), &[&initializer])
+        .execute_instruction(second_ix, &[&initializer])
         .expect("execute second initialize");
     assert!(!second.is_success(), "deterministic config PDA must be initialize-once");
 
