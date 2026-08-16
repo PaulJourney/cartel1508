@@ -1,76 +1,72 @@
-# Final Specification Gap Review
+# Final Specification Resolution
 
-Status: **blocking final mainnet freeze** until the two historical rules below are reconciled with the current core.
+Status: **economic specification resolved for hardening**. Mainnet still remains fail-closed pending CI, devnet smoke, final Program ID, audit and release gates.
 
-This document exists to prevent a technically green build from being mistaken for a fully frozen economic specification.
+## Frozen economics
 
-## Already implemented and considered frozen
-
-- 1 USDT/USDC = 1 unit.
-- Unit quantities are not capped by product policy; only on-chain numeric/transaction constraints apply.
+- 1 USDT/USDC = 1 logical unit.
+- Users may purchase unlimited units subject only to on-chain numeric/transaction limits.
 - Unit purchase is the sole production economic event.
-- Aggregate split is 50% direct + 43% network + 2% Pioneer + 5% service.
-- Standard genealogy is capped at ten economic levels.
-- Standard L1 is the immutable direct sponsor and receives 50% direct only.
-- Standard L2-L10 schedule is `15 / 9 / 6 / 4 / 2.5 / 2 / 1.5 / 1 / 2`.
+- Aggregate split is **50% SELF + 43% network + 2% Pioneer + 5% service**.
+- SELF is always the buyer of the units.
+- The network pool is paid across exactly nine immutable uplines, beginning with the buyer's direct sponsor.
+- Network schedule: `15 / 9 / 6 / 4 / 2.5 / 2 / 1.5 / 1 / 2` = 43%.
 - First 100 real registrations receive Pioneer IDs.
 - Activity threshold is 10 units; ACTIVE 7 days; GRACE 48 hours.
 - Claim is ACTIVE-only and claimant-paid.
 - GRACE temporarily preserves unclaimed value.
-- Once INACTIVE, unclaimed whole-atomic direct/network/Pioneer value is permanently treasury-destined; late reactivation cannot rescue it.
-- Registration, purchase and claim gas are paid by the wallet initiating that transaction; reward accrual itself does not require beneficiary gas.
-- The final intended release is a single core Solana program; the old Evidence/Qualification/Adapter architecture has been removed.
+- Once INACTIVE, whole-atomic unclaimed SELF/network/Pioneer value is permanently treasury-destined; late reactivation cannot rescue it.
+- The production release is a single core Solana program.
 
-## Blocking historical rule 1 — self-reentry
+## Resolved historical rule — self-reentry
 
-Earlier product discussions explicitly allowed a user to **re-enter under themselves** while preserving the original referral relationship, with a discussed target of approximately `0.5 stablecoin direct per re-entry unit` under the 50% direct model.
+The old concept of creating a separate genealogy position "under oneself" is **retired**.
 
-The current core is wallet-based, not position-based:
+The final model achieves the intended economic effect without position multiplication:
 
 - one `UserState` exists per wallet;
-- its `referrer` is immutable;
-- every current purchase treats that immutable referrer as L1;
-- additional units do not create a second genealogy position under the same wallet.
+- the user's registered referrer remains immutable;
+- every purchase treats the buyer as the **SELF economic level** and allocates 50% to that buyer subject to activity/expiry rules;
+- the immutable sponsor is the first network upline and receives 15% subject to activity/expiry rules;
+- repeated purchases are additional units of the same user, not synthetic self-sponsored positions.
 
-Therefore the current core implements **unlimited additional units**, but it does **not** implement a distinct self-reentry position.
+This removes the need for sibling/chained re-entry positions and prevents one wallet from occupying multiple genealogy depths merely by buying repeatedly.
 
-Before mainnet, the final specification must explicitly choose one of these economic meanings:
+## Resolved historical rule — inactive compression
 
-### SR-A — no separate position reentry
+**IC-A is frozen.** The protocol uses fixed-depth percentages plus treasury expiry, not dynamic compression.
 
-Repeated purchases are simply additional units on the same immutable user. The original sponsor remains L1 for every purchase and receives the 50% direct reward whenever eligible.
+For each of the nine network-upline slots:
 
-### SR-B — self-reentry is an economic position
+- ACTIVE: that slot's amount is claimable;
+- GRACE: that slot's amount is pending/preserved for timely requalification;
+- INACTIVE: that slot's amount is permanently treasury-destined;
+- higher ancestors keep only their own fixed percentages;
+- the inactive user's percentage is not reassigned to another ancestor.
 
-A reentry unit/position is placed under the user's own main position. The user can therefore become L1 of the reentry and receive the 50% direct component on that reentry, while the original sponsor/referral ancestry remains above the user's main position.
+The same final inactivity rule applies to the buyer's SELF reward and Pioneer entitlement.
 
-If SR-B is required, the exact treatment of multiple reentries must also be frozen: whether every reentry is a sibling directly under the main position or whether reentries chain under prior reentries. These two models produce materially different multi-level payouts and cannot be inferred safely from the current wallet-only state.
+## Economic-level terminology
 
-**Current implementation corresponds to SR-A.** Do not freeze mainnet until that is confirmed or replaced.
+For product/UI purposes the system can be described as **10 economic levels including the buyer**.
 
-## Blocking historical rule 2 — inactive “compression”
+For smart-contract, audit and technical documentation use the unambiguous terminology:
 
-Earlier product notes also used the term **compression of inactive users**. The current core implements fixed genealogical depth with treasury expiry:
+**SELF + 9 uplines**
 
-- each L2-L10 slot has a fixed percentage;
-- if that specific upline is INACTIVE, its scheduled amount becomes expired/treasury-destined;
-- higher ancestors still receive only their own fixed level percentages;
-- the inactive user's percentage is not reassigned to the next ACTIVE ancestor.
+This avoids confusing the buyer's 50% SELF bucket with the direct sponsor's 15% network slot.
 
-That is **not classic dynamic compression**.
+## Remaining non-economic mainnet gates
 
-Before mainnet, the specification must explicitly freeze one of these meanings:
+The economics above no longer block the specification freeze. Mainnet remains blocked until:
 
-### IC-A — fixed depth + treasury expiry
-
-Inactive user's own scheduled commission goes to service treasury. Higher active uplines keep only their normal fixed percentages. This matches the current core and the separate historical rule that unclaimed/inactive value goes to service.
-
-### IC-B — dynamic compression
-
-Inactive users are skipped for payout purposes, so the next ACTIVE ancestor takes the compressed level slot/percentage. This materially changes ancestry traversal, account requirements and economics and would require a new implementation and adversarial test suite.
-
-**Current implementation corresponds to IC-A.** Do not freeze mainnet until that is confirmed or replaced.
-
-## Engineering rule
-
-No final Program ID, immutable production artifact, independent final audit or mainnet deployment should be treated as final until SR-A/SR-B and IC-A/IC-B are explicitly resolved. Everything else may continue to be tested and hardened in parallel.
+1. exact final core CI is green;
+2. final devnet transaction smoke is green;
+3. final Program ID is generated offline and frozen;
+4. a future registration-open UTC timestamp is frozen;
+5. reproducible/verifiable final artifact and SHA-256 are produced;
+6. independent audit is completed and findings are dispositioned;
+7. the executable pre-mainnet release manifest/gate is fully green;
+8. a deliberately small mainnet smoke succeeds with upgrade authority retained;
+9. deployed bytecode is verified against the audited artifact;
+10. upgrade authority is permanently removed only after all previous gates pass.
