@@ -6,7 +6,7 @@ permissions:
 jobs:
   deploy-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: solana-foundation/github-actions/setup-all@v0.2.15
@@ -45,7 +45,18 @@ jobs:
             fi
             sleep 5
           done
-          test "$funded" = "1"
+
+          if [ "$funded" != "1" ]; then
+            echo "Public RPC airdrop is rate-limited; using the documented programmatic PoW faucet fallback."
+            cargo install devnet-pow --locked
+            # The devnet-pow CLI uses the Solana CLI-configured keypair/RPC by default.
+            # Target 2 SOL so program deployment plus smoke-account rent/fees are covered.
+            timeout 1200s devnet-pow mine --target-lamports 2000000000 -ud || true
+          fi
+
+          BALANCE_LAMPORTS="$(solana balance --lamports --url devnet | awk '{print $1}')"
+          echo "devnet deployer balance: ${BALANCE_LAMPORTS} lamports"
+          test "$BALANCE_LAMPORTS" -ge 1000000000
           solana balance --url devnet | tee /tmp/devnet-start-balance.txt
       - name: Build temporary-ID program
         run: |
@@ -70,8 +81,10 @@ jobs:
           npm run devnet:smoke | tee /tmp/devnet-transaction-smoke.txt
           grep -q 'DEVNET TRANSACTION SMOKE: PASS' /tmp/devnet-transaction-smoke.txt
       - name: Record final ephemeral deployer balance
-        run: solana balance --url devnet | tee /tmp/devnet-end-balance.txt
+        if: always()
+        run: solana balance --url devnet | tee /tmp/devnet-end-balance.txt || true
       - name: Publish only non-secret smoke evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: devnet-transaction-smoke-evidence
@@ -82,4 +95,4 @@ jobs:
             /tmp/devnet-start-balance.txt
             /tmp/devnet-end-balance.txt
             /tmp/devnet-transaction-smoke.txt
-          if-no-files-found: error
+          if-no-files-found: warn
