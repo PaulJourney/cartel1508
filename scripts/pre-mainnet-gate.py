@@ -93,11 +93,16 @@ def main() -> int:
         blockers.append("core Program ID is still a development identity")
 
     if 'PURCHASE_NETWORK_LEVEL_BPS: [u64; 9]' not in constants or '[1_500, 900, 600, 400, 250, 200, 150, 100, 200]' not in constants:
-        blockers.append("final L2-L10 43% production schedule is not frozen")
+        blockers.append("final nine-upline 43% production schedule is not frozen")
     if 'split_purchase_amount(payment)' not in core_lib:
         blockers.append("purchase_and_distribute is not using the final purchase split")
-    if 'for i in 0..9' not in core_lib:
-        blockers.append("production referral traversal is not capped at genealogical L10")
+    if 'for i in 1..9' not in core_lib or 'pub upline_8:' not in core_lib or 'pub upline_9:' in core_lib:
+        blockers.append("production referral traversal is not frozen to sponsor plus eight ancestors")
+    if 'pub struct UnitsPurchased' not in core_lib or 'emit!(UnitsPurchased' not in core_lib:
+        blockers.append("purchase unit ranges are not emitted as the final event-based audit trail")
+    purchase_accounts = core_lib.split('pub struct PurchaseAndDistribute', 1)[1].split('pub struct SettleExpired', 1)[0]
+    if 'UnitBatch' in core_lib or 'pub batch:' in purchase_accounts or 'pub system_program' in purchase_accounts:
+        blockers.append("purchase still carries a per-purchase rent/account-creation surface")
 
     legacy_markers = [
         'purchase_service_units',
