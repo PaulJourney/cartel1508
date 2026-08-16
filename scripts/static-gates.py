@@ -3,6 +3,7 @@ from pathlib import Path
 source = Path('programs/service_referral_protocol/src/lib.rs').read_text()
 constants = Path('programs/service_referral_protocol/src/constants.rs').read_text()
 state = Path('programs/service_referral_protocol/src/state.rs').read_text()
+math = Path('programs/service_referral_protocol/src/math.rs').read_text()
 
 
 def section(start_marker: str, end_marker: str) -> str:
@@ -45,7 +46,7 @@ checks = {
     'inactive unclaimed flow transfers from vault': 'expire_unclaimed_for_mint' in source and 'transfer_from_vault' in source,
     'activity partial window exists': 'qualification_window_started_at' in state and 'qualification_window_started_at' in activity_helper,
     'partial qualification preserves SELF and Pioneer only': 'qualification_window_open' in source and 'preserve_self_and_pioneer' in expiry_helper and 'network_claimable_usdt = 0' in expiry_helper and 'network_pending_usdt = 0' in expiry_helper,
-    'Pioneer positions require one 1000-unit purchase': 'PIONEER_POSITION_PURCHASE_UNITS: u64 = 1_000' in constants and 'units / PIONEER_POSITION_PURCHASE_UNITS' in source,
+    'Pioneer positions require one 1000-unit purchase': 'PIONEER_POSITION_PURCHASE_UNITS: u64 = 1_000' in constants and 'units / PIONEER_POSITION_PURCHASE_UNITS' in math,
     'Pioneer registration consumes no position': 'u.pioneer_positions = 0' in source and 'Registration alone never consumes a Pioneer position' in source,
     'Pioneer global cap is absolute 100': 'pioneer_positions_for_purchase(units, p.pioneer_positions_assigned)' in source and 'p.pioneer_positions_assigned <= PIONEER_SLOTS' in source,
     'Pioneer Rule B assigns after current pool accrual': final_purchase.index('accrue_pioneer(') < final_purchase.index('assign_pioneer_positions_after_purchase('),
