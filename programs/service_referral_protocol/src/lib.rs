@@ -207,9 +207,6 @@ pub mod service_referral_protocol {
             ProtocolError::ReferrerMismatch
         );
 
-        // Expired pending rewards of the buyer are settled before a purchase can
-        // reactivate the buyer. This prevents late reactivation from rescuing value
-        // whose grace period already elapsed.
         settle_expired_all(
             &mut ctx.accounts.user,
             now,
@@ -229,7 +226,7 @@ pub mod service_referral_protocol {
         };
         token::transfer(
             CpiContext::new(
-                ctx.accounts.token_program.to_account_info(),
+                ctx.accounts.token_program.key(),
                 Transfer {
                     from: ctx.accounts.user_source.to_account_info(),
                     to: payment_destination,
@@ -276,10 +273,8 @@ pub mod service_referral_protocol {
                     .ok_or(ProtocolError::ArithmeticOverflow)?;
             }
         } else {
-            // L1 is the immutable direct sponsor and receives 50% direct only.
             add_direct(&mut ctx.accounts.direct_referrer, p, mint, direct)?;
 
-            // These nine writable accounts represent genealogical L2 through L10.
             let uplines = [
                 ctx.accounts.upline_1.as_ref(),
                 ctx.accounts.upline_2.as_ref(),
@@ -1102,7 +1097,7 @@ fn transfer_from_vault<'info>(
     let signer_seeds: &[&[u8]] = &[b"vault-authority", &bump];
     token::transfer(
         CpiContext::new_with_signer(
-            token_program.to_account_info(),
+            token_program.key(),
             Transfer {
                 from: vault.to_account_info(),
                 to: destination.to_account_info(),
