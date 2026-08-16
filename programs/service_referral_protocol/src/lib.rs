@@ -153,13 +153,14 @@ pub mod service_referral_protocol {
     /// One buyer-signed transaction:
     /// - transfers exactly `units * 1 stablecoin` into the canonical vault;
     /// - allocates globally unique units and updates buyer activity;
-    /// - credits L1 direct sponsor with 50%;
-    /// - credits genealogical L2-L10 with the frozen 43% schedule;
+    /// - credits eligible L1 direct sponsor with 50%;
+    /// - credits eligible genealogical L2-L10 with the frozen 43% schedule;
     /// - accrues the 2% Pioneer pool;
-    /// - routes the 5% service allocation and all explicitly unallocated/expired
-    ///   value to the frozen service treasury.
+    /// - routes the 5% service allocation plus unallocated/expired value to treasury.
     ///
-    /// Reward recipients do not sign this instruction. They later use `claim`.
+    /// ACTIVE rewards are claimable. GRACE preserves unclaimed value temporarily.
+    /// Once a user is INACTIVE, all previously unclaimed direct/network/Pioneer
+    /// value is treasury-destined and cannot be rescued by late reactivation.
     pub fn purchase_and_distribute<'info>(
         ctx: Context<'info, PurchaseAndDistribute<'info>>,
         units: u64,
@@ -207,6 +208,8 @@ pub mod service_referral_protocol {
             ProtocolError::ReferrerMismatch
         );
 
+        // Expire all of the buyer's treasury-destined value before a purchase can
+        // reactivate them. This makes late reactivation unable to rescue commissions.
         settle_expired_all(
             &mut ctx.accounts.user,
             now,
@@ -273,7 +276,29 @@ pub mod service_referral_protocol {
                     .ok_or(ProtocolError::ArithmeticOverflow)?;
             }
         } else {
-            add_direct(&mut ctx.accounts.direct_referrer, p, mint, direct)?;
+            // Settle any prior unclaimed value if L1 is already inactive.
+            let prior_expired = expire_unclaimed_for_mint(
+                &mut ctx.accounts.direct_referrer,
+                now,
+                p,
+                mint,
+            )?;
+            expired_flow = expired_flow
+                .checked_add(prior_expired)
+                .ok_or(ProtocolError::ArithmeticOverflow)?;
+
+            // L1 is the direct sponsor and receives 50% only while ACTIVE/GRACE.
+            match activity_status(&ctx.accounts.direct_referrer, now) {
+                ActivityStatus::Active | ActivityStatus::Grace => {
+                    add_direct(&mut ctx.accounts.direct_referrer, p, mint, direct)?;
+                }
+                ActivityStatus::Inactive => {
+                    mark_user_expired(&mut ctx.accounts.direct_referrer, p, mint, direct)?;
+                    expired_flow = expired_flow
+                        .checked_add(direct)
+                        .ok_or(ProtocolError::ArithmeticOverflow)?;
+                }
+            }
 
             let uplines = [
                 ctx.accounts.upline_1.as_ref(),
@@ -311,7 +336,7 @@ pub mod service_referral_protocol {
                     break;
                 }
 
-                let previously_expired = expire_pending_for_mint(&mut upline, now, p, mint)?;
+                let previously_expired = expire_unclaimed_for_mint(&mut upline, now, p, mint)?;
                 expired_flow = expired_flow
                     .checked_add(previously_expired)
                     .ok_or(ProtocolError::ArithmeticOverflow)?;
@@ -378,6 +403,8 @@ pub mod service_referral_protocol {
         Ok(())
     }
 
+    /// Permissionless physical settlement of value that became treasury-destined
+    /// because the user is inactive. The settler pays the Solana transaction fee.
     pub fn settle_expired(ctx: Context<SettleExpired>) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
         validate_user_pda(&ctx.accounts.user)?;
@@ -394,7 +421,7 @@ pub mod service_referral_protocol {
             &ctx.accounts.service_treasury_token,
         )?;
 
-        let amount = expire_pending_for_mint(
+        let amount = expire_unclaimed_for_mint(
             &mut ctx.accounts.user,
             now,
             &mut ctx.accounts.protocol,
@@ -854,26 +881,56 @@ fn mark_user_expired(
     Ok(())
 }
 
-fn expire_pending_for_mint(
+/// Converts every whole-token-atom liability for an INACTIVE user into treasury-
+/// destined expired value for one mint. ACTIVE and GRACE users are untouched.
+/// Pioneer fractional dust remains in the checkpoint difference until it becomes a
+/// whole atomic unit; this preserves exact long-run conservation.
+fn expire_unclaimed_for_mint(
     user: &mut UserState,
     now: i64,
     p: &mut ProtocolState,
     mint: Pubkey,
 ) -> Result<u64> {
-    if user.grace_until == 0 || now <= user.grace_until {
+    if activity_status(user, now) != ActivityStatus::Inactive {
         return Ok(0);
     }
-    let amount = if mint == p.usdt_mint {
-        let amount = user.network_pending_usdt;
+
+    let pioneer = pioneer_due(user, p, mint)?;
+    let (direct, network_claimable, network_pending) = if mint == p.usdt_mint {
+        let values = (
+            user.direct_accrued_usdt,
+            user.network_claimable_usdt,
+            user.network_pending_usdt,
+        );
+        user.direct_accrued_usdt = 0;
+        user.network_claimable_usdt = 0;
         user.network_pending_usdt = 0;
-        amount
+        values
     } else if mint == p.usdc_mint {
-        let amount = user.network_pending_usdc;
+        let values = (
+            user.direct_accrued_usdc,
+            user.network_claimable_usdc,
+            user.network_pending_usdc,
+        );
+        user.direct_accrued_usdc = 0;
+        user.network_claimable_usdc = 0;
         user.network_pending_usdc = 0;
-        amount
+        values
     } else {
         return err!(ProtocolError::UnsupportedToken);
     };
+
+    let amount = direct
+        .checked_add(network_claimable)
+        .ok_or(ProtocolError::ArithmeticOverflow)?
+        .checked_add(network_pending)
+        .ok_or(ProtocolError::ArithmeticOverflow)?
+        .checked_add(pioneer)
+        .ok_or(ProtocolError::ArithmeticOverflow)?;
+
+    if pioneer > 0 {
+        checkpoint_pioneer_claimed(user, p, mint, pioneer)?;
+    }
     mark_user_expired(user, p, mint, amount)?;
     Ok(amount)
 }
@@ -890,13 +947,10 @@ fn settle_expired_all<'info>(
     treasury_usdc: &Box<Account<'info, TokenAccount>>,
     token_program: &Program<'info, Token>,
 ) -> Result<()> {
-    if user.grace_until == 0 || now <= user.grace_until {
-        return Ok(());
-    }
     let usdt_mint = p.usdt_mint;
     let usdc_mint = p.usdc_mint;
-    let usdt = expire_pending_for_mint(user, now, p, usdt_mint)?;
-    let usdc = expire_pending_for_mint(user, now, p, usdc_mint)?;
+    let usdt = expire_unclaimed_for_mint(user, now, p, usdt_mint)?;
+    let usdc = expire_unclaimed_for_mint(user, now, p, usdc_mint)?;
     if usdt > 0 {
         transfer_from_vault(
             p,
@@ -1184,7 +1238,7 @@ pub enum ProtocolError {
     InvalidUserPda,
     #[msg("Token account is not the canonical associated token account")]
     NonCanonicalTokenAccount,
-    #[msg("No expired pending reward to settle")]
+    #[msg("No inactive unclaimed reward to settle")]
     NothingToSettle,
     #[msg("User is not active")]
     NotActive,
