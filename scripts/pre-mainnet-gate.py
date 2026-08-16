@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CONSTANTS = ROOT / "programs/service_referral_protocol/src/constants.rs"
 CORE_LIB = ROOT / "programs/service_referral_protocol/src/lib.rs"
 STATE = ROOT / "programs/service_referral_protocol/src/state.rs"
+MATH = ROOT / "programs/service_referral_protocol/src/math.rs"
 ANCHOR = ROOT / "Anchor.toml"
 MANIFEST = ROOT / "release/mainnet-release.json"
 CORE_ARTIFACT = ROOT / "target/deploy/service_referral_protocol.so"
@@ -77,6 +78,7 @@ def main() -> int:
     constants = CONSTANTS.read_text()
     core_lib = CORE_LIB.read_text()
     state = STATE.read_text()
+    math = MATH.read_text()
     anchor = ANCHOR.read_text()
 
     program_id = declare_id(core_lib)
@@ -98,8 +100,36 @@ def main() -> int:
         blockers.append("purchase_and_distribute is not using the final purchase split")
     if 'for i in 1..9' not in core_lib or 'pub upline_8:' not in core_lib or 'pub upline_9:' in core_lib:
         blockers.append("production referral traversal is not frozen to sponsor plus eight ancestors")
+
+    # Pioneer release invariants are mainnet gates, not documentation-only rules.
+    if 'PIONEER_SLOTS: u16 = 100' not in constants:
+        blockers.append("Pioneer global position cap is not frozen to 100")
+    if 'PIONEER_POSITION_PURCHASE_UNITS: u64 = 1_000' not in constants:
+        blockers.append("Pioneer single-purchase threshold is not frozen to 1000 units")
+    if 'pub fn pioneer_positions_for_purchase' not in math:
+        blockers.append("Pioneer purchase-position calculator is missing")
+    else:
+        if 'units / PIONEER_POSITION_PURCHASE_UNITS' not in math:
+            blockers.append("Pioneer positions are not derived from one purchase only")
+        if 'requested.min(remaining)' not in math or 'already_assigned >= PIONEER_SLOTS' not in math:
+            blockers.append("Pioneer purchase-position calculator does not enforce the absolute 100 cap")
+    if 'pub pioneer_positions_assigned: u16' not in state or 'pub pioneer_positions: u16' not in state:
+        blockers.append("weighted Pioneer position state is not present")
+    if 'pioneer_id' in state or 'pioneer_id' in core_lib:
+        blockers.append("legacy one-Pioneer-ID-per-registration state remains")
+    if 'u.pioneer_positions = 0' not in core_lib:
+        blockers.append("registration does not explicitly start with zero Pioneer positions")
+    accrue_at = core_lib.find('let pioneer_unassigned = accrue_pioneer')
+    assign_at = core_lib.find('assign_pioneer_positions_after_purchase')
+    if accrue_at < 0 or assign_at < 0 or accrue_at >= assign_at:
+        blockers.append("Pioneer Rule B is not frozen: current-event accrual must precede new-position assignment")
+    if 'checked_mul(user.pioneer_positions as u128)' not in core_lib:
+        blockers.append("Pioneer entitlement is not weighted by wallet position count")
+
     if 'pub struct UnitsPurchased' not in core_lib or 'emit!(UnitsPurchased' not in core_lib:
         blockers.append("purchase unit ranges are not emitted as the final event-based audit trail")
+    if 'pub pioneer_positions_added: u16' not in core_lib or 'pub pioneer_positions_total: u16' not in core_lib:
+        blockers.append("purchase event does not expose Pioneer position additions/total")
     purchase_accounts = core_lib.split('pub struct PurchaseAndDistribute', 1)[1].split('pub struct SettleExpired', 1)[0]
     if 'UnitBatch' in core_lib or 'pub batch:' in purchase_accounts or 'pub system_program' in purchase_accounts:
         blockers.append("purchase still carries a per-purchase rent/account-creation surface")
