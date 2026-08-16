@@ -1,0 +1,38 @@
+name: fix-rentless-purchase-clients
+
+on:
+  push:
+    branches:
+      - agent/qualified-revenue-final-integration
+    paths:
+      - scripts/fix-rentless-purchase-clients.py
+      - .github/workflows/fix-rentless-purchase-clients.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/qualified-revenue-final-integration
+          fetch-depth: 0
+      - name: Align clients and release gate
+        run: python3 scripts/fix-rentless-purchase-clients.py
+      - name: Validate patch
+        run: |
+          git diff --check
+          git diff --exit-code -- scripts/fix-rentless-purchase-clients.py .github/workflows/fix-rentless-purchase-clients.yml
+      - name: Commit alignment
+        run: |
+          if git diff --quiet; then
+            echo "Clients already aligned"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add integration-tests/tests scripts/devnet-transaction-smoke.mjs scripts/pre-mainnet-gate.py
+          git commit -m "align clients with rentless purchase ABI"
+          git push origin HEAD:agent/qualified-revenue-final-integration
