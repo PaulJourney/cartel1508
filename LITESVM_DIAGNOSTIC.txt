@@ -1,0 +1,123 @@
+LITESVM_EXIT_STATUS=101
+--- focused failure lines ---
+--- final 120 lines ---
+518 | #[derive(Accounts)]
+    |          ^^^^^^^^
+    |
+    = note: expected values for `feature` are: `cpi`, `default`, `idl-build`, `no-entrypoint`, `no-idl`, `no-log-ix-name`, and `production`
+    = note: using a cfg inside a derive macro will use the cfgs from the destination crate and not the ones from the defining crate
+    = help: try referring to `Accounts` crate for guidance on how handle this unexpected cfg
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: this warning originates in the derive macro `Accounts` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unexpected `cfg` condition value: `anchor-debug`
+   --> /home/runner/work/cartel1508/cartel1508/programs/service_referral_protocol/src/lib.rs:548:10
+    |
+548 | #[derive(Accounts)]
+    |          ^^^^^^^^
+    |
+    = note: expected values for `feature` are: `cpi`, `default`, `idl-build`, `no-entrypoint`, `no-idl`, `no-log-ix-name`, and `production`
+    = note: using a cfg inside a derive macro will use the cfgs from the destination crate and not the ones from the defining crate
+    = help: try referring to `Accounts` crate for guidance on how handle this unexpected cfg
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: this warning originates in the derive macro `Accounts` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unexpected `cfg` condition value: `anchor-debug`
+   --> /home/runner/work/cartel1508/cartel1508/programs/service_referral_protocol/src/lib.rs:572:10
+    |
+572 | #[derive(Accounts)]
+    |          ^^^^^^^^
+    |
+    = note: expected values for `feature` are: `cpi`, `default`, `idl-build`, `no-entrypoint`, `no-idl`, `no-log-ix-name`, and `production`
+    = note: using a cfg inside a derive macro will use the cfgs from the destination crate and not the ones from the defining crate
+    = help: try referring to `Accounts` crate for guidance on how handle this unexpected cfg
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: this warning originates in the derive macro `Accounts` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unexpected `cfg` condition value: `anchor-debug`
+   --> /home/runner/work/cartel1508/cartel1508/programs/service_referral_protocol/src/lib.rs:623:10
+    |
+623 | #[derive(Accounts)]
+    |          ^^^^^^^^
+    |
+    = note: expected values for `feature` are: `cpi`, `default`, `idl-build`, `no-entrypoint`, `no-idl`, `no-log-ix-name`, and `production`
+    = note: using a cfg inside a derive macro will use the cfgs from the destination crate and not the ones from the defining crate
+    = help: try referring to `Accounts` crate for guidance on how handle this unexpected cfg
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: this warning originates in the derive macro `Accounts` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unexpected `cfg` condition value: `anchor-debug`
+   --> /home/runner/work/cartel1508/cartel1508/programs/service_referral_protocol/src/lib.rs:641:10
+    |
+641 | #[derive(Accounts)]
+    |          ^^^^^^^^
+    |
+    = note: expected values for `feature` are: `cpi`, `default`, `idl-build`, `no-entrypoint`, `no-idl`, `no-log-ix-name`, and `production`
+    = note: using a cfg inside a derive macro will use the cfgs from the destination crate and not the ones from the defining crate
+    = help: try referring to `Accounts` crate for guidance on how handle this unexpected cfg
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: this warning originates in the derive macro `Accounts` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: `service_referral_protocol` (lib) generated 6 warnings
+   Compiling protocol-integration-tests v0.1.0 (/home/runner/work/cartel1508/cartel1508/integration-tests)
+error[E0063]: missing field `token_program` in initializer of `service_referral_protocol::accounts::PurchaseAndDistribute`
+  --> tests/batching_equivalence.rs:82:23
+   |
+82 |             .accounts(service_referral_protocol::accounts::PurchaseAndDistribute {
+   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `token_program`
+
+For more information about this error, try `rustc --explain E0063`.
+error: could not compile `protocol-integration-tests` (test "batching_equivalence") due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error[E0425]: cannot find value `sponsor_batch` in this scope
+  --> tests/grace_expiry.rs:89:20
+   |
+89 |             batch: sponsor_batch, token_program: spl_token::id(),
+   |                    ^^^^^^^^^^^^^
+   |
+help: a local variable with a similar name exists
+   |
+89 -             batch: sponsor_batch, token_program: spl_token::id(),
+89 +             batch: sponsor_usdc, token_program: spl_token::id(),
+   |
+
+error[E0425]: cannot find value `buyer_batch` in this scope
+   --> tests/grace_expiry.rs:124:20
+    |
+124 |             batch: buyer_batch, token_program: spl_token::id(),
+    |                    ^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `batch` in this scope
+   --> tests/deep_network.rs:183:17
+    |
+183 |                 batch,
+    |                 ^^^^^ not found in this scope
+
+error[E0560]: struct `service_referral_protocol::accounts::PurchaseAndDistribute` has no field named `batch`
+   --> tests/deep_network.rs:183:17
+    |
+183 |                 batch,
+    |                 ^^^^^ `service_referral_protocol::accounts::PurchaseAndDistribute` does not have this field
+    |
+    = note: all struct fields are already assigned
+
+error[E0560]: struct `service_referral_protocol::accounts::PurchaseAndDistribute` has no field named `batch`
+  --> tests/grace_expiry.rs:89:13
+   |
+89 |             batch: sponsor_batch, token_program: spl_token::id(),
+   |             ^^^^^ `service_referral_protocol::accounts::PurchaseAndDistribute` does not have this field
+   |
+   = note: all struct fields are already assigned
+
+error[E0560]: struct `service_referral_protocol::accounts::PurchaseAndDistribute` has no field named `batch`
+   --> tests/grace_expiry.rs:124:13
+    |
+124 |             batch: buyer_batch, token_program: spl_token::id(),
+    |             ^^^^^ `service_referral_protocol::accounts::PurchaseAndDistribute` does not have this field
+    |
+    = note: all struct fields are already assigned
+
+Some errors have detailed explanations: E0425, E0560.
+For more information about an error, try `rustc --explain E0425`.
+error: could not compile `protocol-integration-tests` (test "grace_expiry") due to 4 previous errors
+error: could not compile `protocol-integration-tests` (test "deep_network") due to 2 previous errors
