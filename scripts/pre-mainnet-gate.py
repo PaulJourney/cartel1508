@@ -13,6 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CONSTANTS = ROOT / "programs/service_referral_protocol/src/constants.rs"
 CORE_LIB = ROOT / "programs/service_referral_protocol/src/lib.rs"
+STATE = ROOT / "programs/service_referral_protocol/src/state.rs"
 ANCHOR = ROOT / "Anchor.toml"
 MANIFEST = ROOT / "release/mainnet-release.json"
 CORE_ARTIFACT = ROOT / "target/deploy/service_referral_protocol.so"
@@ -75,12 +76,13 @@ def main() -> int:
 
     constants = CONSTANTS.read_text()
     core_lib = CORE_LIB.read_text()
+    state = STATE.read_text()
     anchor = ANCHOR.read_text()
 
     program_id = declare_id(core_lib)
-    treasury = extract(r'MAINNET_SERVICE_TREASURY: Pubkey = pubkey!\("([1-9A-HJ-NP-Za-km-z]+)"\)', constants, "mainnet treasury")
-    usdt = extract(r'MAINNET_USDT_MINT: Pubkey = pubkey!\("([1-9A-HJ-NP-Za-km-z]+)"\)', constants, "USDT mint")
-    usdc = extract(r'MAINNET_USDC_MINT: Pubkey = pubkey!\("([1-9A-HJ-NP-Za-km-z]+)"\)', constants, "USDC mint")
+    treasury = extract(r'MAINNET_SERVICE_TREASURY: Pubkey\s*=\s*pubkey!\("([1-9A-HJ-NP-Za-km-z]+)"\)', constants, "mainnet treasury")
+    usdt = extract(r'MAINNET_USDT_MINT: Pubkey\s*=\s*pubkey!\("([1-9A-HJ-NP-Za-km-z]+)"\)', constants, "USDT mint")
+    usdc = extract(r'MAINNET_USDC_MINT: Pubkey\s*=\s*pubkey!\("([1-9A-HJ-NP-Za-km-z]+)"\)', constants, "USDC mint")
     registration_open = int(extract(r'MAINNET_REGISTRATION_OPEN_AT: i64 = (-?\d+)', constants, "registration open timestamp"))
 
     for field, actual in (("service_treasury", treasury), ("usdt_mint", usdt), ("usdc_mint", usdc)):
@@ -90,14 +92,25 @@ def main() -> int:
     if program_id in DEVELOPMENT_PROGRAM_IDS:
         blockers.append("core Program ID is still a development identity")
 
-    if 'PURCHASE_NETWORK_LEVEL_BPS: [u64; 9] = [1_500, 900, 600, 400, 250, 200, 150, 100, 200]' not in constants:
+    if 'PURCHASE_NETWORK_LEVEL_BPS: [u64; 9]' not in constants or '[1_500, 900, 600, 400, 250, 200, 150, 100, 200]' not in constants:
         blockers.append("final L2-L10 43% production schedule is not frozen")
     if 'split_purchase_amount(payment)' not in core_lib:
         blockers.append("purchase_and_distribute is not using the final purchase split")
     if 'for i in 0..9' not in core_lib:
         blockers.append("production referral traversal is not capped at genealogical L10")
-    if 'LegacyRevenuePathDisabled' not in core_lib:
-        blockers.append("legacy revenue paths are not fail-closed in production")
+
+    legacy_markers = [
+        'purchase_service_units',
+        'record_qualified_revenue',
+        'RecordQualifiedRevenue',
+        'qualified_revenue_source',
+        'MAINNET_QUALIFIED_REVENUE_SOURCE',
+        'MAINNET_REVENUE_ADAPTER_PROGRAM',
+        'LegacyRevenuePathDisabled',
+    ]
+    for marker in legacy_markers:
+        if marker in core_lib or marker in state or marker in constants:
+            blockers.append(f"legacy revenue marker remains in final core: {marker}")
 
     if registration_open <= 0:
         blockers.append("registration_open_at is not frozen to a positive UTC unix timestamp")
