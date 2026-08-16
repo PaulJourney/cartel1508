@@ -49,9 +49,9 @@ jobs:
           done
 
           if [ "$funded" != "1" ]; then
-            echo "Public RPC airdrop is rate-limited; using documented PoW faucet fallback."
+            echo "Public RPC airdrop is rate-limited; using explicit Solana Foundation PoW parameters."
             cargo install devnet-pow
-            timeout 1200s devnet-pow mine --target-lamports 2000000000 -ud || true
+            timeout 1200s devnet-pow mine -d 3 --reward 0.02 --no-infer -t 5000000000 || true
           fi
 
           BALANCE_LAMPORTS="$(solana balance --lamports --url devnet | awk '{print $1}')"
