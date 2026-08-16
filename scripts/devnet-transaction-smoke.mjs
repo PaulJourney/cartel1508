@@ -90,8 +90,6 @@ console.log(`Program ID: ${programId.toBase58()}`);
 console.log(`Buyer:      ${payer.publicKey.toBase58()}`);
 console.log(`Sponsor:    ${sponsor.publicKey.toBase58()}`);
 
-// Fund the sponsor only with devnet SOL needed to sign its registration,
-// activation purchase and later pull claim. No protocol account subsidizes gas.
 const fundSponsor = SystemProgram.transfer({
   fromPubkey: payer.publicKey,
   toPubkey: sponsor.publicKey,
@@ -125,73 +123,28 @@ const [buyerBatch0] = PublicKey.findProgramAddressSync(
   programId,
 );
 
-// Devnet-only mock stablecoins. The program still enforces legacy SPL Token,
-// canonical ATAs and six-decimal mints exactly as the production core does.
 const usdtMint = await createMint(connection, payer, payer.publicKey, null, 6);
 const usdcMint = await createMint(connection, payer, payer.publicKey, null, 6);
 
 const sponsorUsdt = await getOrCreateAssociatedTokenAccount(
-  connection,
-  payer,
-  usdtMint,
-  sponsor.publicKey,
-  false,
-  "confirmed",
-  undefined,
-  TOKEN_PROGRAM_ID,
+  connection, payer, usdtMint, sponsor.publicKey, false, "confirmed", undefined, TOKEN_PROGRAM_ID,
 );
 const buyerUsdt = await getOrCreateAssociatedTokenAccount(
-  connection,
-  payer,
-  usdtMint,
-  payer.publicKey,
-  false,
-  "confirmed",
-  undefined,
-  TOKEN_PROGRAM_ID,
+  connection, payer, usdtMint, payer.publicKey, false, "confirmed", undefined, TOKEN_PROGRAM_ID,
 );
 const usdtVault = await getOrCreateAssociatedTokenAccount(
-  connection,
-  payer,
-  usdtMint,
-  vaultAuthority,
-  true,
-  "confirmed",
-  undefined,
-  TOKEN_PROGRAM_ID,
+  connection, payer, usdtMint, vaultAuthority, true, "confirmed", undefined, TOKEN_PROGRAM_ID,
 );
 const usdcVault = await getOrCreateAssociatedTokenAccount(
-  connection,
-  payer,
-  usdcMint,
-  vaultAuthority,
-  true,
-  "confirmed",
-  undefined,
-  TOKEN_PROGRAM_ID,
+  connection, payer, usdcMint, vaultAuthority, true, "confirmed", undefined, TOKEN_PROGRAM_ID,
 );
 const treasuryUsdt = await getOrCreateAssociatedTokenAccount(
-  connection,
-  payer,
-  usdtMint,
-  treasury.publicKey,
-  false,
-  "confirmed",
-  undefined,
-  TOKEN_PROGRAM_ID,
+  connection, payer, usdtMint, treasury.publicKey, false, "confirmed", undefined, TOKEN_PROGRAM_ID,
 );
 const treasuryUsdc = await getOrCreateAssociatedTokenAccount(
-  connection,
-  payer,
-  usdcMint,
-  treasury.publicKey,
-  false,
-  "confirmed",
-  undefined,
-  TOKEN_PROGRAM_ID,
+  connection, payer, usdcMint, treasury.publicKey, false, "confirmed", undefined, TOKEN_PROGRAM_ID,
 );
 
-// Exactly 110 test USDT are minted: sponsor activates with 10; buyer purchases 100.
 await mintTo(connection, payer, usdtMint, sponsorUsdt.address, payer, 10n * TOKEN_SCALE);
 await mintTo(connection, payer, usdtMint, buyerUsdt.address, payer, 100n * TOKEN_SCALE);
 
@@ -210,7 +163,6 @@ const initializeIx = await program.methods
   })
   .instruction();
 await send(connection, payer, initializeIx, "initialize final core");
-
 await waitUntilChainTime(connection, openAt);
 
 const registerSponsorIx = await program.methods
@@ -229,7 +181,6 @@ await send(connection, sponsor, registerSponsorIx, "register sponsor / Pioneer #
 const rootNine = Object.fromEntries(
   Array.from({ length: 9 }, (_, i) => [`upline${i + 1}`, technicalRoot]),
 );
-
 const sponsorPurchaseIx = await program.methods
   .purchaseAndDistribute(new BN(10))
   .accounts({
@@ -256,8 +207,6 @@ let buyerToken = await getAccount(connection, buyerUsdt.address, "confirmed", TO
 let treasuryToken = await getAccount(connection, treasuryUsdt.address, "confirmed", TOKEN_PROGRAM_ID);
 let vaultToken = await getAccount(connection, usdtVault.address, "confirmed", TOKEN_PROGRAM_ID);
 
-// Sponsor is under the technical root. Its 50% direct and all 43% depth are therefore
-// unallocated; of the 2% Pioneer pool, Pioneer #1 owns 1/100 = 0.002 USDT.
 invariant(sponsorToken.amount === 0n, "sponsor activation must spend exactly 10 USDT");
 invariant(buyerToken.amount === 100n * TOKEN_SCALE, "buyer funds must remain untouched before buyer purchase");
 invariant(treasuryToken.amount === 9_998_000n, "sponsor activation treasury amount mismatch");
@@ -310,12 +259,6 @@ buyerToken = await getAccount(connection, buyerUsdt.address, "confirmed", TOKEN_
 treasuryToken = await getAccount(connection, treasuryUsdt.address, "confirmed", TOKEN_PROGRAM_ID);
 vaultToken = await getAccount(connection, usdtVault.address, "confirmed", TOKEN_PROGRAM_ID);
 
-// Buyer purchase 100 USDT:
-// - 50.000 direct liability to sponsor L1;
-// - 43.000 unallocated network because L2 is technical root;
-// - 2.000 Pioneer pool => 0.020 each to two registered Pioneers, 1.960 unassigned;
-// - 5.000 service.
-// Buyer-purchase treasury increment = 49.960; new claim liability = 50.040.
 invariant(buyerToken.amount === 0n, "buyer purchase must spend exactly 100 USDT");
 invariant(treasuryToken.amount === 59_958_000n, "combined treasury balance mismatch after buyer purchase");
 invariant(vaultToken.amount === 50_042_000n, "combined vault liabilities mismatch after buyer purchase");
@@ -337,11 +280,9 @@ invariant(asBigInt(sponsorBatch.firstUnitId) === 1n && asBigInt(sponsorBatch.las
 invariant(asBigInt(buyerBatch.firstUnitId) === 11n && asBigInt(buyerBatch.lastUnitId) === 110n, "buyer unit IDs must be 11..110");
 invariant(asBigInt(protocolStateBeforeClaims.nextUnitId) === 111n, "next global Unit ID must be 111");
 invariant(asBigInt(protocolStateBeforeClaims.lifetimeServiceFeesUsdt) === 5_500_000n, "5% service metric mismatch");
-invariant(asBigInt(protocolStateBeforeClaims.lifetimeUnallocatedUsdt) === 102_300_000n, "unallocated direct/network metric mismatch");
+invariant(asBigInt(protocolStateBeforeClaims.lifetimeUnallocatedUsdt) === 52_300_000n, "unallocated direct/network metric mismatch");
 invariant(asBigInt(protocolStateBeforeClaims.lifetimePioneerUnassignedUsdt) === 2_158_000n, "Pioneer unassigned metric mismatch");
 
-// Sponsor independently signs and pays gas for one pull claim containing all of its
-// accumulated direct + Pioneer entitlement: 50 + 0.002 + 0.020 = 50.022 USDT.
 const sponsorClaimIx = await program.methods
   .claim()
   .accounts({
@@ -356,7 +297,6 @@ const sponsorClaimIx = await program.methods
   .instruction();
 await send(connection, sponsor, sponsorClaimIx, "sponsor pull-claims 50% direct + Pioneer");
 
-// Buyer independently claims its 0.020 USDT Pioneer entitlement.
 const buyerClaimIx = await program.methods
   .claim()
   .accounts({
@@ -390,26 +330,20 @@ const total = sponsorToken.amount + buyerToken.amount + treasuryToken.amount + v
 invariant(total === 110n * TOKEN_SCALE, "end-to-end token conservation must equal exactly 110 minted test USDT");
 
 console.log("DEVNET TRANSACTION SMOKE: PASS");
-console.log(
-  JSON.stringify(
-    {
-      programId: programId.toBase58(),
-      protocol: protocol.toBase58(),
-      sponsor: sponsor.publicKey.toBase58(),
-      sponsorUser: sponsorUser.toBase58(),
-      buyer: payer.publicKey.toBase58(),
-      buyerUser: buyerUser.toBase58(),
-      sponsorBatch0: sponsorBatch0.toBase58(),
-      buyerBatch0: buyerBatch0.toBase58(),
-      usdtMint: usdtMint.toBase58(),
-      usdcMint: usdcMint.toBase58(),
-      treasury: treasury.publicKey.toBase58(),
-      finalSponsorAtomic: sponsorToken.amount.toString(),
-      finalBuyerAtomic: buyerToken.amount.toString(),
-      finalTreasuryAtomic: treasuryToken.amount.toString(),
-      finalVaultAtomic: vaultToken.amount.toString(),
-    },
-    null,
-    2,
-  ),
-);
+console.log(JSON.stringify({
+  programId: programId.toBase58(),
+  protocol: protocol.toBase58(),
+  sponsor: sponsor.publicKey.toBase58(),
+  sponsorUser: sponsorUser.toBase58(),
+  buyer: payer.publicKey.toBase58(),
+  buyerUser: buyerUser.toBase58(),
+  sponsorBatch0: sponsorBatch0.toBase58(),
+  buyerBatch0: buyerBatch0.toBase58(),
+  usdtMint: usdtMint.toBase58(),
+  usdcMint: usdcMint.toBase58(),
+  treasury: treasury.publicKey.toBase58(),
+  finalSponsorAtomic: sponsorToken.amount.toString(),
+  finalBuyerAtomic: buyerToken.amount.toString(),
+  finalTreasuryAtomic: treasuryToken.amount.toString(),
+  finalVaultAtomic: vaultToken.amount.toString(),
+}, null, 2));
