@@ -745,7 +745,6 @@ fn update_activity_after_purchase(
         .ok_or(ProtocolError::ArithmeticOverflow)?;
 
     if user.qualification_progress_units > 0
-        && user.qualification_window_started_at > 0
         && now
             > user
                 .qualification_window_started_at
@@ -897,7 +896,7 @@ fn mark_user_expired(
 /// SELF and Pioneer value created during this window is provisional so splitting the
 /// same qualifying purchase into multiple transactions cannot change its economics.
 fn qualification_window_open(user: &UserState, now: i64) -> bool {
-    if user.qualification_progress_units == 0 || user.qualification_window_started_at <= 0 {
+    if user.qualification_progress_units == 0 {
         return false;
     }
     user.qualification_window_started_at
