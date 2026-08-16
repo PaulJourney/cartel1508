@@ -178,8 +178,8 @@ const registerSponsorIx = await program.methods
   .instruction();
 await send(connection, sponsor, registerSponsorIx, "register sponsor / Pioneer #1");
 
-const rootNine = Object.fromEntries(
-  Array.from({ length: 9 }, (_, i) => [`upline${i + 1}`, technicalRoot]),
+const rootEight = Object.fromEntries(
+  Array.from({ length: 8 }, (_, i) => [`upline${i + 1}`, technicalRoot]),
 );
 const sponsorPurchaseIx = await program.methods
   .purchaseAndDistribute(new BN(10))
@@ -194,13 +194,13 @@ const sponsorPurchaseIx = await program.methods
     serviceTreasuryUsdt: treasuryUsdt.address,
     serviceTreasuryUsdc: treasuryUsdc.address,
     directReferrer: technicalRoot,
-    ...rootNine,
+    ...rootEight,
     batch: sponsorBatch0,
     tokenProgram: TOKEN_PROGRAM_ID,
     systemProgram: SystemProgram.programId,
   })
   .instruction();
-await send(connection, sponsor, sponsorPurchaseIx, "sponsor buys 10 units / becomes ACTIVE");
+await send(connection, sponsor, sponsorPurchaseIx, "sponsor buys 10 units / SELF activates");
 
 let sponsorToken = await getAccount(connection, sponsorUsdt.address, "confirmed", TOKEN_PROGRAM_ID);
 let buyerToken = await getAccount(connection, buyerUsdt.address, "confirmed", TOKEN_PROGRAM_ID);
@@ -209,8 +209,8 @@ let vaultToken = await getAccount(connection, usdtVault.address, "confirmed", TO
 
 invariant(sponsorToken.amount === 0n, "sponsor activation must spend exactly 10 USDT");
 invariant(buyerToken.amount === 100n * TOKEN_SCALE, "buyer funds must remain untouched before buyer purchase");
-invariant(treasuryToken.amount === 9_998_000n, "sponsor activation treasury amount mismatch");
-invariant(vaultToken.amount === 2_000n, "sponsor activation Pioneer liability mismatch");
+invariant(treasuryToken.amount === 4_998_000n, "sponsor activation treasury amount mismatch");
+invariant(vaultToken.amount === 5_002_000n, "sponsor SELF + Pioneer liability mismatch");
 
 const registerBuyerIx = await program.methods
   .register()
@@ -251,7 +251,7 @@ const buyerPurchaseIx = await program.methods
     systemProgram: SystemProgram.programId,
   })
   .instruction();
-await send(connection, payer, buyerPurchaseIx, "buyer buys 100 units + creates all referral accounting");
+await send(connection, payer, buyerPurchaseIx, "buyer buys 100 units / SELF + nine-upline accounting");
 
 sponsorToken = await getAccount(connection, sponsorUsdt.address, "confirmed", TOKEN_PROGRAM_ID);
 buyerToken = await getAccount(connection, buyerUsdt.address, "confirmed", TOKEN_PROGRAM_ID);
@@ -259,8 +259,8 @@ treasuryToken = await getAccount(connection, treasuryUsdt.address, "confirmed", 
 vaultToken = await getAccount(connection, usdtVault.address, "confirmed", TOKEN_PROGRAM_ID);
 
 invariant(buyerToken.amount === 0n, "buyer purchase must spend exactly 100 USDT");
-invariant(treasuryToken.amount === 59_958_000n, "combined treasury balance mismatch after buyer purchase");
-invariant(vaultToken.amount === 50_042_000n, "combined vault liabilities mismatch after buyer purchase");
+invariant(treasuryToken.amount === 39_958_000n, "combined treasury balance mismatch after buyer purchase");
+invariant(vaultToken.amount === 70_042_000n, "combined vault liabilities mismatch after buyer purchase");
 
 const sponsorState = await program.account.userState.fetch(sponsorUser);
 const buyerState = await program.account.userState.fetch(buyerUser);
@@ -270,8 +270,9 @@ const protocolStateBeforeClaims = await program.account.protocolState.fetch(prot
 
 invariant(asBigInt(sponsorState.pioneerId) === 1n, "sponsor must be Pioneer #1");
 invariant(asBigInt(buyerState.pioneerId) === 2n, "buyer must be Pioneer #2");
-invariant(asBigInt(sponsorState.selfAccruedUsdt) === 50n * TOKEN_SCALE, "sponsor direct reward must be exactly 50%");
-invariant(asBigInt(sponsorState.networkClaimableUsdt) === 0n, "L1 sponsor must not receive a duplicate network share");
+invariant(asBigInt(sponsorState.selfAccruedUsdt) === 5n * TOKEN_SCALE, "sponsor own SELF reward must be exactly 5 USDT");
+invariant(asBigInt(sponsorState.networkClaimableUsdt) === 15n * TOKEN_SCALE, "sponsor U1 reward must be exactly 15 USDT");
+invariant(asBigInt(buyerState.selfAccruedUsdt) === 50n * TOKEN_SCALE, "buyer SELF reward must be exactly 50 USDT");
 invariant(asBigInt(buyerState.lifetimeServiceUnits) === 100n, "buyer must own 100 logical units");
 invariant(asBigInt(sponsorState.activeUntil) >= BigInt(await chainUnixTime(connection)), "sponsor must remain ACTIVE");
 invariant(asBigInt(buyerState.activeUntil) >= BigInt(await chainUnixTime(connection)), "100-unit purchase must leave buyer ACTIVE");
@@ -279,7 +280,7 @@ invariant(asBigInt(sponsorBatch.firstUnitId) === 1n && asBigInt(sponsorBatch.las
 invariant(asBigInt(buyerBatch.firstUnitId) === 11n && asBigInt(buyerBatch.lastUnitId) === 110n, "buyer unit IDs must be 11..110");
 invariant(asBigInt(protocolStateBeforeClaims.nextUnitId) === 111n, "next global Unit ID must be 111");
 invariant(asBigInt(protocolStateBeforeClaims.lifetimeServiceFeesUsdt) === 5_500_000n, "5% service metric mismatch");
-invariant(asBigInt(protocolStateBeforeClaims.lifetimeUnallocatedUsdt) === 52_300_000n, "unallocated direct/network metric mismatch");
+invariant(asBigInt(protocolStateBeforeClaims.lifetimeUnallocatedUsdt) === 32_300_000n, "unallocated upper-network metric mismatch");
 invariant(asBigInt(protocolStateBeforeClaims.lifetimePioneerUnassignedUsdt) === 2_158_000n, "Pioneer unassigned metric mismatch");
 
 const sponsorClaimIx = await program.methods
@@ -294,7 +295,7 @@ const sponsorClaimIx = await program.methods
     tokenProgram: TOKEN_PROGRAM_ID,
   })
   .instruction();
-await send(connection, sponsor, sponsorClaimIx, "sponsor pull-claims 50% direct + Pioneer");
+await send(connection, sponsor, sponsorClaimIx, "sponsor pull-claims SELF + U1 + Pioneer");
 
 const buyerClaimIx = await program.methods
   .claim()
@@ -308,7 +309,7 @@ const buyerClaimIx = await program.methods
     tokenProgram: TOKEN_PROGRAM_ID,
   })
   .instruction();
-await send(connection, payer, buyerClaimIx, "buyer pull-claims Pioneer entitlement");
+await send(connection, payer, buyerClaimIx, "buyer pull-claims SELF + Pioneer");
 
 sponsorToken = await getAccount(connection, sponsorUsdt.address, "confirmed", TOKEN_PROGRAM_ID);
 buyerToken = await getAccount(connection, buyerUsdt.address, "confirmed", TOKEN_PROGRAM_ID);
@@ -317,13 +318,15 @@ vaultToken = await getAccount(connection, usdtVault.address, "confirmed", TOKEN_
 const sponsorAfter = await program.account.userState.fetch(sponsorUser);
 const buyerAfter = await program.account.userState.fetch(buyerUser);
 
-invariant(sponsorToken.amount === 50_022_000n, "sponsor claim must pay exactly 50.022 USDT");
-invariant(buyerToken.amount === 20_000n, "buyer Pioneer claim must pay exactly 0.020 USDT");
-invariant(treasuryToken.amount === 59_958_000n, "claims must not change treasury balance");
-invariant(vaultToken.amount === 0n, "all test liabilities must be fully claimable and leave vault empty");
-invariant(asBigInt(sponsorAfter.selfAccruedUsdt) === 0n, "sponsor direct bucket must clear after claim");
-invariant(asBigInt(sponsorAfter.lifetimeClaimedUsdt) === 50_022_000n, "sponsor lifetime claim metric mismatch");
-invariant(asBigInt(buyerAfter.lifetimeClaimedUsdt) === 20_000n, "buyer lifetime claim metric mismatch");
+invariant(sponsorToken.amount === 20_022_000n, "sponsor claim must pay exactly 20.022 USDT");
+invariant(buyerToken.amount === 50_020_000n, "buyer claim must pay exactly 50.020 USDT");
+invariant(treasuryToken.amount === 39_958_000n, "claims must not change treasury balance");
+invariant(vaultToken.amount === 0n, "all test liabilities must be fully claimed and leave vault empty");
+invariant(asBigInt(sponsorAfter.selfAccruedUsdt) === 0n, "sponsor SELF bucket must clear after claim");
+invariant(asBigInt(sponsorAfter.networkClaimableUsdt) === 0n, "sponsor network bucket must clear after claim");
+invariant(asBigInt(sponsorAfter.lifetimeClaimedUsdt) === 20_022_000n, "sponsor lifetime claim metric mismatch");
+invariant(asBigInt(buyerAfter.selfAccruedUsdt) === 0n, "buyer SELF bucket must clear after claim");
+invariant(asBigInt(buyerAfter.lifetimeClaimedUsdt) === 50_020_000n, "buyer lifetime claim metric mismatch");
 
 const total = sponsorToken.amount + buyerToken.amount + treasuryToken.amount + vaultToken.amount;
 invariant(total === 110n * TOKEN_SCALE, "end-to-end token conservation must equal exactly 110 minted test USDT");
