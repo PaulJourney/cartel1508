@@ -11,6 +11,29 @@ pub fn mul_bps(amount: u64, bps: u64) -> Result<u64> {
     u64::try_from(v).map_err(|_| ProtocolError::ArithmeticOverflow.into())
 }
 
+// Final production split for purchase-triggered economics.
+// L1 is the direct sponsor and receives DIRECT_BPS only. levels[0] therefore
+// corresponds to genealogical L2 and levels[8] to genealogical L10.
+pub fn split_purchase_amount(amount: u64) -> Result<(u64, [u64; 9], u64, u64, u64)> {
+    let direct = mul_bps(amount, DIRECT_BPS)?;
+    let pioneer = mul_bps(amount, PIONEER_BPS)?;
+    let service = mul_bps(amount, SERVICE_BPS)?;
+    let mut levels = [0u64; 9];
+    let mut network_sum = 0u64;
+    for (i, bps) in PURCHASE_NETWORK_LEVEL_BPS.iter().enumerate() {
+        levels[i] = mul_bps(amount, *bps)?;
+        network_sum = network_sum.checked_add(levels[i]).ok_or(ProtocolError::ArithmeticOverflow)?;
+    }
+    let allocated = direct
+        .checked_add(network_sum).ok_or(ProtocolError::ArithmeticOverflow)?
+        .checked_add(pioneer).ok_or(ProtocolError::ArithmeticOverflow)?
+        .checked_add(service).ok_or(ProtocolError::ArithmeticOverflow)?;
+    let rounding_remainder = amount.checked_sub(allocated).ok_or(ProtocolError::ArithmeticUnderflow)?;
+    Ok((direct, levels, pioneer, service, rounding_remainder))
+}
+
+// Legacy development-only qualified-revenue split retained temporarily while
+// the old adapter/qualification regression stack is removed from production.
 pub fn split_amount(amount: u64) -> Result<(u64, [u64; 10], u64, u64, u64)> {
     let direct = mul_bps(amount, DIRECT_BPS)?;
     let pioneer = mul_bps(amount, PIONEER_BPS)?;
@@ -52,7 +75,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn percentages_conserve_one_usdc() {
+    fn production_purchase_percentages_conserve_one_usdc() {
+        let amount = 1_000_000u64;
+        let (direct, levels, pioneer, service, remainder) = split_purchase_amount(amount).unwrap();
+        assert_eq!(direct, 500_000);
+        assert_eq!(levels, [150_000, 90_000, 60_000, 40_000, 25_000, 20_000, 15_000, 10_000, 20_000]);
+        assert_eq!(levels.iter().sum::<u64>(), 430_000);
+        assert_eq!(pioneer, 20_000);
+        assert_eq!(service, 50_000);
+        assert_eq!(remainder, 0);
+    }
+
+    #[test]
+    fn legacy_split_still_conserves_one_usdc_for_regression_builds() {
         let amount = 1_000_000u64;
         let (direct, levels, pioneer, service, remainder) = split_amount(amount).unwrap();
         assert_eq!(direct, 500_000);
@@ -81,7 +116,7 @@ mod tests {
     }
 
     #[test]
-    fn split_conserves_every_sample_including_u64_boundaries() {
+    fn production_split_conserves_every_sample_including_u64_boundaries() {
         let fixed = [
             1u64,
             2,
@@ -99,16 +134,15 @@ mod tests {
         ];
 
         for amount in fixed {
-            assert_split_conservation(amount);
+            assert_purchase_split_conservation(amount);
         }
 
-        // Deterministic pseudo-random coverage: reproducible in CI, no fuzz dependency.
         let mut x = 0x9E37_79B9_7F4A_7C15u64;
         for _ in 0..50_000 {
             x = x
                 .wrapping_mul(6_364_136_223_846_793_005)
                 .wrapping_add(1_442_695_040_888_963_407);
-            assert_split_conservation(x.max(1));
+            assert_purchase_split_conservation(x.max(1));
         }
     }
 
@@ -135,8 +169,8 @@ mod tests {
         }
     }
 
-    fn assert_split_conservation(amount: u64) {
-        let (direct, levels, pioneer, service, remainder) = split_amount(amount).unwrap();
+    fn assert_purchase_split_conservation(amount: u64) {
+        let (direct, levels, pioneer, service, remainder) = split_purchase_amount(amount).unwrap();
         let network = levels.iter().fold(0u128, |acc, v| acc + (*v as u128));
         let total = (direct as u128)
             + network
