@@ -15,6 +15,7 @@ legacy_revenue = section('    pub fn record_qualified_revenue', '    pub fn sett
 final_purchase = section('    pub fn purchase_and_distribute', '    pub fn claim')
 claim = section('    pub fn claim', '}\n\n#[derive(Accounts)]')
 activity_helper = section('fn update_activity_after_purchase', 'fn add_direct')
+production_accounts = section("pub struct PurchaseAndDistribute", "pub struct SettleExpired")
 
 checks = {
     'no owner/admin mutation surface': all(x not in source for x in ['owner_admin', 'set_admin', 'transfer_admin', 'set_owner']),
@@ -22,13 +23,14 @@ checks = {
     'no treasury mutation instruction': 'set_treasury' not in source,
     'no referral mutation instruction': 'set_referrer' not in source,
     'no revenue-source mutation instruction': 'set_qualified_revenue_source' not in source,
-    'final purchase is the reward event': all(x in final_purchase for x in ['split_amount(payment)', 'add_direct(', 'add_network_claimable(', 'accrue_pioneer(']),
+    'final purchase is the reward event': all(x in final_purchase for x in ['split_purchase_amount(payment)', 'add_direct(', 'add_network_claimable(', 'accrue_pioneer(']),
     'final purchase sends buyer funds to canonical vault': 'to: payment_destination' in final_purchase and 'validate_vault_token_for_mint' in final_purchase,
-    'sponsor is direct level one': 'direct_referrer.wallet == ctx.accounts.user.referrer' in final_purchase and 'add_direct(&mut ctx.accounts.direct_referrer' in final_purchase,
-    'network starts above sponsor': 'let mut expected_wallet = ctx.accounts.direct_referrer.referrer' in final_purchase,
+    'sponsor is direct level one only': 'direct_referrer.wallet == ctx.accounts.user.referrer' in final_purchase and 'add_direct(&mut ctx.accounts.direct_referrer' in final_purchase,
+    'network starts at genealogical level two': 'let mut expected_wallet = ctx.accounts.direct_referrer.referrer' in final_purchase,
+    'production network stops at level ten': 'for i in 0..9' in final_purchase and all(f'upline_{i}' in production_accounts for i in range(1, 10)) and 'upline_10' not in production_accounts,
+    'production network weights are nine levels and 43 percent': 'PURCHASE_NETWORK_LEVEL_BPS: [u64; 9]' in constants and '[1_500, 900, 600, 400, 250, 200, 150, 100, 200]' in constants,
     'legacy purchase disabled in production': '#[cfg(feature = "production")]' in legacy_purchase and 'LegacyRevenuePathDisabled' in legacy_purchase,
     'legacy qualified revenue disabled in production': '#[cfg(feature = "production")]' in legacy_revenue and 'LegacyRevenuePathDisabled' in legacy_revenue,
-    '10 explicit upline accounts': all(f'upline_{i}' in source for i in range(1, 11)),
     'canonical ATA derivation exists': 'get_associated_token_address_with_program_id' in source and 'canonical_ata(' in source,
     'vault ATA must be canonical': 'vault.key() == canonical_ata(vault_authority, mint)' in source,
     'treasury ATA must be canonical': 'treasury.key() == canonical_ata(p.service_treasury, mint)' in source,
@@ -45,8 +47,8 @@ checks = {
     'claim requires claimant wallet signer': "pub wallet: Signer<'info>" in source and 'seeds = [b"user", wallet.key().as_ref()]' in source,
     'legacy token program is fixed': 'token::ID' in source,
     'mainnet treasury and stablecoin constants are frozen': all(x in constants for x in ['MAINNET_USDT_MINT', 'MAINNET_USDC_MINT', 'MAINNET_SERVICE_TREASURY']),
-    'production launch source/time constants exist': all(x in constants for x in ['MAINNET_QUALIFIED_REVENUE_SOURCE', 'MAINNET_REGISTRATION_OPEN_AT']),
-    'production initialization pins immutable mainnet inputs': all(x in source for x in ['validate_initialization_environment(', 'MAINNET_SERVICE_TREASURY', 'MAINNET_USDT_MINT', 'MAINNET_USDC_MINT', 'MAINNET_QUALIFIED_REVENUE_SOURCE', 'MAINNET_REGISTRATION_OPEN_AT', 'ProductionConfigNotFrozen', 'InvalidProductionConfig']),
+    'production launch time constant exists': 'MAINNET_REGISTRATION_OPEN_AT' in constants,
+    'production initialization pins immutable mainnet inputs': all(x in source for x in ['validate_initialization_environment(', 'MAINNET_SERVICE_TREASURY', 'MAINNET_USDT_MINT', 'MAINNET_USDC_MINT', 'MAINNET_REGISTRATION_OPEN_AT', 'ProductionConfigNotFrozen', 'InvalidProductionConfig']),
     'initialization uses typed SPL Mint accounts': "pub usdt_mint: Box<Account<'info, Mint>>" in source and "pub usdc_mint: Box<Account<'info, Mint>>" in source,
     'stablecoin mints require six decimals': source.count('decimals == TOKEN_DECIMALS as u8') >= 2 and 'InvalidTokenDecimals' in source,
     'USDT and USDC mint accounts must differ': 'usdt_mint.key() != ctx.accounts.usdc_mint.key()' in source and 'DuplicateStablecoinMint' in source,
