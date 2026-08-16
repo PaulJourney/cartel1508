@@ -8,7 +8,9 @@ Before any mainnet deployment:
 
 - `purchase_and_distribute` must be the sole production economic entrypoint;
 - all obsolete qualified-revenue source/adapter/evidence/qualification state and instructions must be removed from the final core;
-- final L1–L10 genealogy and 50/43/2/5 constants must be frozen;
+- final **SELF + 9 uplines** and 50/43/2/5 constants must be frozen;
+- Pioneer must be frozen to the purchase-earned model: 100 total positions, 1,000-unit single-purchase threshold, multiple positions per wallet, absolute cap and Rule B;
+- registration must assign zero Pioneer positions;
 - service treasury and canonical USDT/USDC mints must be frozen;
 - registration-opening UTC must be frozen;
 - no mutable owner/admin instruction may remain.
@@ -37,6 +39,17 @@ From a clean checkout of the release commit:
 - build the verifiable artifact;
 - record `.so` SHA-256, IDL, `Cargo.lock`, source commit and toolchain versions.
 
+The final automated suite must include Pioneer evidence for at least:
+
+- registration = 0 positions;
+- separate `500 + 500` purchases = 0 positions;
+- one 1,000-unit purchase = 1 position;
+- one wallet can hold multiple positions;
+- Rule B excludes newly created positions from the creating purchase;
+- 98/100 + 3,000 units = exactly 2 final positions;
+- 100/100 permanently blocks additional positions;
+- weighted checkpoints prevent retroactive Pioneer rewards.
+
 Any source/configuration/dependency change after this point invalidates the artifact hash and requires the gates to be rerun.
 
 ## 4. Devnet smoke on the final interface
@@ -44,15 +57,20 @@ Any source/configuration/dependency change after this point invalidates the arti
 Before independent final sign-off, deploy a temporary/dev identity and exercise the same final instruction surface:
 
 1. initialize;
-2. register a controlled genealogy;
+2. register a controlled genealogy and verify registration itself creates zero Pioneer positions;
 3. purchase units using USDC/USDT-compatible six-decimal test mints;
-4. verify global unit IDs and activity state;
-5. verify 50% direct / 43% L2–L10 / 2% Pioneer / 5% service accounting;
-6. verify canonical vault collateral;
-7. claim from an ACTIVE beneficiary using a separate claimant-signed transaction;
-8. test an invalid ancestry/account substitution and verify complete rollback;
-9. test grace/expiry behavior;
-10. verify final token conservation.
+4. verify global Unit IDs and activity state;
+5. verify 50% SELF / 43% nine-upline network / 2% Pioneer / 5% service accounting;
+6. exercise the purchase-earned Pioneer path, including Rule B and saturation behavior;
+7. verify canonical vault collateral;
+8. claim from an ACTIVE beneficiary using a separate claimant-signed transaction;
+9. verify final token conservation.
+
+The maintained `scripts/devnet-transaction-smoke.mjs` includes a real-transaction Pioneer sequence that reaches 98 positions from one purchase, caps a later 3,000-unit purchase to the final two positions, then verifies that a subsequent 5,000-unit purchase cannot create position 101.
+
+A faucet/rate-limit failure **before deployment is not a protocol smoke failure and is not passing evidence**. The release remains blocked until a real devnet deploy and transaction sequence completes successfully.
+
+Record the successful GitHub Actions run URL and evidence-artifact digest in the final release manifest.
 
 Devnet evidence is workflow evidence only; it is not a substitute for mainnet bytecode verification or independent audit.
 
@@ -66,16 +84,20 @@ Give the auditor:
 - exact dependency lockfile;
 - final IDL;
 - exact production/verifiable artifact hash;
-- automated test/build evidence;
+- exact protocol-CI, RustSec, verifiable-build and successful devnet-smoke evidence;
+- `AUDIT_SCOPE.md` and `AUDIT_HANDOFF.md`;
 - client transaction-builder source used to derive sponsor/upline accounts.
 
 Audit at minimum:
 
 - purchase payment amount and token-account validation;
-- immutable referral ancestry and L2–L10 traversal;
+- immutable referral ancestry and SELF + nine-upline traversal;
 - 50/43/2/5 conservation and rounding;
 - ACTIVE/GRACE/INACTIVE behavior;
-- Pioneer indexing/fractional carry;
+- Pioneer 1,000-unit per-purchase qualification;
+- Pioneer absolute 100-position cap and 98->100 boundary;
+- Pioneer Rule B and weighted checkpoint/reward-debt arithmetic;
+- Pioneer fractional carry and unassigned-share treasury routing;
 - vault collateral and treasury routing;
 - pull claim authorization;
 - expiry settlement;
@@ -96,9 +118,14 @@ Create `release/mainnet-release.json` from the example and populate:
 - service treasury;
 - USDT mint;
 - USDC mint;
+- frozen economics/Pioneer fingerprint fields;
 - final production `.so` SHA-256;
 - independent audit-report SHA-256;
-- verified-build evidence URL;
+- exact protocol-CI run URL;
+- exact RustSec run URL;
+- exact verified-build run URL;
+- successful devnet-smoke run URL and evidence SHA-256;
+- `devnet_smoke_status: "passed"`;
 - `audit_status: "passed"`;
 - `smoke_test_plan_approved: true`.
 
@@ -146,7 +173,8 @@ Also verify:
 - Program ID equals the frozen public ID;
 - mainnet `Anchor.toml` mapping matches;
 - IDL corresponds to the same source commit;
-- service treasury and canonical stablecoin constants match the release manifest.
+- service treasury and canonical stablecoin constants match the release manifest;
+- frozen Pioneer constants and source shape match the audited release.
 
 Do not initialize if any comparison fails.
 
@@ -166,17 +194,19 @@ Verify protocol and technical-root PDAs immediately after initialization.
 Use deliberately small amounts and controlled wallets. Verify at least:
 
 - one registration under the intended referral relationship;
-- one unit purchase using a canonical supported stablecoin account;
+- one small canonical-stablecoin unit purchase;
 - exact unit count / Unit ID assignment;
 - buyer-paid purchase transaction;
 - expected vault and treasury movement;
-- expected direct/network/Pioneer accruals;
+- expected SELF/network/Pioneer accounting for the current pre-existing Pioneer state;
 - separate ACTIVE pull claim signed by the beneficiary;
 - claimant-paid transaction fee;
 - final token conservation;
 - no unexpected state/account changes.
 
-Run at least one intentionally invalid ancestry/account test if it can be done without risking production state; otherwise rely on the exact audited LiteSVM adversarial evidence.
+Do **not** use a large 1,000+ unit mainnet purchase merely to manufacture a Pioneer test if doing so would consume production Pioneer capacity. Pioneer threshold/cap/Rule B behavior is proven in the exact audited LiteSVM/devnet evidence; the mainnet smoke should minimize irreversible production-state impact.
+
+Run an intentionally invalid ancestry/account test only if it can be done without risking production state; otherwise rely on the exact audited adversarial evidence.
 
 Stop immediately on any bytecode, Program ID, PDA, genealogy, state, balance or accounting mismatch.
 
