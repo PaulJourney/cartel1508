@@ -1,4 +1,4 @@
-# Service Referral Protocol — Solana V0.12
+# Service Referral Protocol — Solana V0.13
 
 Public development repository for an ownerless Solana/Anchor protocol foundation.
 
@@ -7,14 +7,15 @@ Public development repository for an ownerless Solana/Anchor protocol foundation
 - Solana + Anchor/Rust.
 - USDT and USDC are separate accounting rails.
 - **1 USDT/USDC = 1 globally unique logical unit.** Users may purchase any number of units, subject only to SPL-token numeric limits per transaction/batch.
-- Every unit purchase is itself the economic event that funds and creates the referral accounting. There is no second revenue event in the production model.
-- Immutable referral relationship.
+- Every unit purchase is itself the sole production economic event that funds and creates referral accounting.
+- Referral relationships are immutable after registration.
 - The direct sponsor is genealogical **Level 1** and receives the **50% direct reward only**; it does not also receive a referral-depth percentage.
 - Activity threshold: 10 units; ACTIVE 7 days; GRACE 48 hours.
-- Network rewards: ACTIVE -> claimable, GRACE -> pending, INACTIVE -> treasury allocation.
-- Direct attributed rewards and Pioneer entitlement persist but can only be claimed while ACTIVE.
+- ACTIVE users may claim accrued rewards.
+- During GRACE, unclaimed value is temporarily preserved; reactivation within GRACE preserves that value.
+- Once INACTIVE, all whole-atomic unclaimed direct, network and Pioneer value becomes permanently treasury-destined. Late reactivation cannot rescue it.
 - First 100 real registrations receive non-transferable Pioneer IDs.
-- Pull-based claims: users sign the claim and pay their own SOL transaction fee.
+- Claims are pull-based: users sign the claim and pay their own SOL transaction fee.
 
 ## Gas / transaction-fee model
 
@@ -22,9 +23,9 @@ The protocol does not send one transaction to every reward recipient.
 
 - Registration: the registering wallet signs and pays SOL transaction/account-creation costs.
 - Unit purchase: the buyer signs once and pays the Solana transaction fee. The same transaction transfers USDT/USDC into the protocol vault, creates the unit batch, updates activity and accounts for 50% direct + 43% network + 2% Pioneer + 5% service.
-- Reward accrual: sponsor/uplines/Pioneers do not sign and pay no gas merely because an accrual was recorded for them.
-- Claim: the beneficiary signs a separate claim transaction and pays its own SOL fee. Multiple accruals can therefore be accumulated and withdrawn with one claim.
-- Expired pending amounts can be settled permissionlessly; no permanent platform keeper is required.
+- Reward accrual: sponsor/uplines/Pioneers do not sign and pay no gas merely because an accrual is recorded for them.
+- Claim: the ACTIVE beneficiary signs a separate claim transaction and pays its own SOL fee. Multiple accruals can be accumulated and withdrawn with one claim.
+- Expiration settlement: once a user is INACTIVE, treasury-destined unclaimed value can be physically settled permissionlessly; whoever submits that settlement transaction pays its SOL fee. No permanent platform keeper is required.
 
 ## Frozen percentages
 
@@ -49,15 +50,23 @@ The final Levels 2–10 schedule is:
 
 The nine network weights sum to exactly 43%. This is the minimal-delta remapping of the historical ten-weight table: the two deepest historical 1% buckets are consolidated into L10. There is no L11 economic level and L1 is never paid twice.
 
-The complete allocation is therefore exactly **50 + 43 + 2 + 5 = 100%**, before deterministic integer-rounding handling.
+The complete allocation is exactly **50 + 43 + 2 + 5 = 100%**, before deterministic integer-rounding handling.
 
-## Production path
+## Final production surface
 
-The final production entrypoint is `purchase_and_distribute`:
+The main economic path is:
 
-`buyer -> stablecoin vault -> unit/activity update + 50/43/2/5 accounting -> later pull claims`
+`buyer -> purchase_and_distribute -> canonical stablecoin vault -> unit/activity + 50/43/2/5 accounting -> later claim or expiry settlement`
 
-The prior `purchase_service_units` and `record_qualified_revenue` paths are retained temporarily for development/regression comparison but are explicitly disabled when the core program is compiled with the `production` feature. The old Evidence/Qualification/Adapter chain is not part of the intended final production economics and must not be treated as a mainnet dependency.
+The on-chain instruction surface is limited to:
+
+- `initialize`
+- `register`
+- `purchase_and_distribute`
+- `settle_expired`
+- `claim`
+
+The previous qualified-revenue, Evidence, Qualification and Revenue Adapter programs/instructions have been removed from the final branch. They are not mainnet dependencies and are not part of the final audit/deployment surface.
 
 ## Mainnet identities under review
 
@@ -65,23 +74,24 @@ The prior `purchase_service_units` and `record_qualified_revenue` paths are reta
 - USDT: `Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB`
 - USDC: `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`
 
-The currently declared Program ID is a development identity and must not be treated as mainnet-final until a controlled program keypair is preserved outside the public repository and the verified build passes.
+The currently declared Program ID is still a development identity. The final Program ID keypair must be generated offline; only its public key belongs in source control.
 
 ## Mainnet gate
 
-Do **not** deploy immutable mainnet until all of these pass:
+Do **not** make the program immutable on mainnet until all of these pass:
 
-1. Anchor production build on the pinned toolchain.
-2. Rust/reference/integration/adversarial tests for purchase-triggered economics and pull claims.
-3. Devnet tests with canonical-compatible SPL token accounts.
-4. Obsolete qualified-revenue programs and release dependencies removed from the final production surface.
-5. Independent audit of the final production core and client transaction construction.
-6. Public reproducible/verified build.
-7. Registration opening UTC frozen.
-8. Final Program ID generated and preserved outside the public repository.
-9. Small mainnet smoke test while upgrade authority still exists.
-10. Only after bytecode verification and smoke success, remove program upgrade authority permanently.
+1. Final core production build on the pinned toolchain.
+2. Reference, Rust, LiteSVM integration and adversarial tests all green on the exact release commit.
+3. Devnet smoke using the exact final instruction surface.
+4. Independent audit of the exact final core and client transaction construction.
+5. Public reproducible/verifiable build and SHA-256 of the final `.so`.
+6. Final Program ID generated offline and frozen consistently in source/configuration.
+7. Future registration-opening UTC frozen.
+8. `release/mainnet-release.json` completed and the executable pre-mainnet gate fully green.
+9. Controlled mainnet deployment and small smoke while upgrade authority is still retained.
+10. Deployed bytecode verified against the audited artifact.
+11. Only then permanently remove program upgrade authority.
 
 ## Important Solana property
 
-Time does not execute transactions by itself. A reward can become economically expired after the grace timestamp, but token movement to the treasury occurs on the next instruction that settles/touches that state. No platform-funded transaction is required merely for time to pass.
+Time does not execute transactions by itself. After the grace timestamp, unclaimed value is economically treasury-destined, but physical token movement occurs on the next instruction that settles or touches the relevant state. This does not require a platform-funded transaction per commission event.
