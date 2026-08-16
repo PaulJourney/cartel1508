@@ -1,5 +1,5 @@
 use anchor_lang::{prelude::*, AccountDeserialize};
-use anchor_litesvm::{AnchorLiteSVM, AssertionHelpers, TestHelpers};
+use anchor_litesvm::{AnchorContext, AnchorLiteSVM, AssertionHelpers, TestHelpers};
 use service_referral_protocol::{
     state::{ProtocolState, UserState},
     ID,
@@ -10,20 +10,20 @@ use solana_transaction::Transaction;
 const PROGRAM_BYTES: &[u8] = include_bytes!("../../target/deploy/service_referral_protocol.so");
 const UNIT: u64 = 1_000_000;
 
-fn read_user(ctx: &AnchorLiteSVM, pda: Pubkey) -> UserState {
+fn read_user(ctx: &AnchorContext, pda: Pubkey) -> UserState {
     let account = ctx.svm.get_account(&pda).expect("user state");
     let mut data = account.data.as_slice();
     UserState::try_deserialize(&mut data).expect("deserialize user")
 }
 
-fn read_protocol(ctx: &AnchorLiteSVM, pda: Pubkey) -> ProtocolState {
+fn read_protocol(ctx: &AnchorContext, pda: Pubkey) -> ProtocolState {
     let account = ctx.svm.get_account(&pda).expect("protocol state");
     let mut data = account.data.as_slice();
     ProtocolState::try_deserialize(&mut data).expect("deserialize protocol")
 }
 
 #[test]
-fn false_upline_cannot_move_tokens_create_units_or_leave_partial_rewards() {
+fn false_upline_cannot_move_tokens_allocate_units_or_leave_partial_rewards() {
     let mut ctx = AnchorLiteSVM::build_with_program(ID, PROGRAM_BYTES);
     let initializer = ctx
         .svm
@@ -181,10 +181,10 @@ fn false_upline_cannot_move_tokens_create_units_or_leave_partial_rewards() {
     let l1_before = read_user(&ctx, l1_pda);
     let protocol_before = read_protocol(&ctx, protocol);
 
-    // The buyer's immutable ancestry is buyer -> L1 -> L2. We deliberately pass
-    // technical_root as the first network account instead of the canonical L2 PDA.
-    // The handler has already transferred payment and allocated a batch by the time
-    // it reaches dynamic ancestry validation, so Solana atomic rollback is essential.
+    // The immutable ancestry is buyer -> U1/L1 -> U2/L2. We deliberately pass
+    // technical_root as the first ancestor account instead of the canonical L2 PDA.
+    // The handler has already transferred payment and advanced in-memory purchase/unit
+    // accounting before dynamic ancestry validation, so Solana atomic rollback is essential.
     let invalid_purchase = ctx
         .program()
         .accounts(service_referral_protocol::accounts::PurchaseAndDistribute {
@@ -220,13 +220,11 @@ fn false_upline_cannot_move_tokens_create_units_or_leave_partial_rewards() {
         "substituting a false upline must fail"
     );
 
+    // Rentless final ABI: there is no UnitBatch PDA to inspect. Atomic rollback is
+    // proven directly by token balances, user purchase index/unit totals and global Unit ID.
     ctx.svm.assert_token_balance(&buyer_usdc, 100 * UNIT);
     ctx.svm.assert_token_balance(&vault_usdc, 0);
     ctx.svm.assert_token_balance(&treasury_usdc, 0);
-    assert!(
-        ctx.svm.get_account(&buyer_batch).is_none(),
-        "failed purchase must not leave a UnitBatch"
-    );
 
     let buyer_after = read_user(&ctx, buyer_pda);
     let l1_after = read_user(&ctx, l1_pda);
@@ -238,10 +236,13 @@ fn false_upline_cannot_move_tokens_create_units_or_leave_partial_rewards() {
     );
     assert_eq!(buyer_after.next_purchase_index, buyer_before.next_purchase_index);
     assert_eq!(buyer_after.active_until, buyer_before.active_until);
+    assert_eq!(buyer_after.self_accrued_usdc, buyer_before.self_accrued_usdc);
     assert_eq!(
-        l1_after.self_accrued_usdc,
-        l1_before.self_accrued_usdc
+        l1_after.network_claimable_usdc,
+        l1_before.network_claimable_usdc
     );
+    assert_eq!(l1_after.network_pending_usdc, l1_before.network_pending_usdc);
+    assert_eq!(l1_after.self_accrued_usdc, l1_before.self_accrued_usdc);
     assert_eq!(protocol_after.next_unit_id, protocol_before.next_unit_id);
     assert_eq!(
         protocol_after.pioneer_index_usdc,
