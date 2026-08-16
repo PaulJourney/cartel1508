@@ -180,7 +180,6 @@ pub mod service_referral_protocol {
 
         let (first_unit_id, last_unit_id, next_unit_id) = allocate_unit_range(ctx.accounts.protocol.next_unit_id, units)?;
         ctx.accounts.protocol.next_unit_id = next_unit_id;
-
         update_activity_after_purchase(&mut ctx.accounts.user, units, now, pre_status)?;
 
         let batch = &mut ctx.accounts.batch;
@@ -250,9 +249,7 @@ pub mod service_referral_protocol {
             require!(upline.wallet == expected_wallet, ProtocolError::InvalidUpline);
 
             if upline.is_technical_root() {
-                for remaining in levels.iter().skip(i) {
-                    unallocated_network = unallocated_network.checked_add(*remaining).ok_or(ProtocolError::ArithmeticOverflow)?;
-                }
+                for remaining in levels.iter().skip(i) { unallocated_network = unallocated_network.checked_add(*remaining).ok_or(ProtocolError::ArithmeticOverflow)?; }
                 break;
             }
 
@@ -311,8 +308,8 @@ pub mod service_referral_protocol {
     }
 
     // Final economic path: every 1 USDT/USDC unit purchase is itself the revenue
-    // event. The buyer signs once and pays the transaction fee; recipients only
-    // accrue on-chain balances and later pay gas when they choose to claim.
+    // event. L1 is the direct sponsor and receives 50% only. The 43% network pool
+    // begins at genealogical L2 and ends at L10.
     pub fn purchase_and_distribute<'info>(ctx: Context<'info, PurchaseAndDistribute<'info>>, units: u64) -> Result<()> {
         require!(units > 0, ProtocolError::ZeroUnits);
         let payment_u128 = (units as u128).checked_mul(TOKEN_SCALE as u128).ok_or(ProtocolError::ArithmeticOverflow)?;
@@ -374,16 +371,14 @@ pub mod service_referral_protocol {
         batch.last_unit_id = last_unit_id;
         batch.purchased_at = now;
 
-        let (direct, levels, pioneer, service, rounding_remainder) = split_amount(payment)?;
+        let (direct, levels, pioneer, service, rounding_remainder) = split_purchase_amount(payment)?;
         let p = &mut ctx.accounts.protocol;
         let mut unallocated: u64 = 0;
         let mut expired_flow: u64 = 0;
 
         if ctx.accounts.direct_referrer.is_technical_root() {
             unallocated = unallocated.checked_add(direct).ok_or(ProtocolError::ArithmeticOverflow)?;
-            for level in levels {
-                unallocated = unallocated.checked_add(level).ok_or(ProtocolError::ArithmeticOverflow)?;
-            }
+            for level in levels { unallocated = unallocated.checked_add(level).ok_or(ProtocolError::ArithmeticOverflow)?; }
         } else {
             add_direct(&mut ctx.accounts.direct_referrer, p, mint, direct)?;
 
@@ -392,11 +387,11 @@ pub mod service_referral_protocol {
                 ctx.accounts.upline_3.as_ref(), ctx.accounts.upline_4.as_ref(),
                 ctx.accounts.upline_5.as_ref(), ctx.accounts.upline_6.as_ref(),
                 ctx.accounts.upline_7.as_ref(), ctx.accounts.upline_8.as_ref(),
-                ctx.accounts.upline_9.as_ref(), ctx.accounts.upline_10.as_ref(),
+                ctx.accounts.upline_9.as_ref(),
             ];
             let mut expected_wallet = ctx.accounts.direct_referrer.referrer;
 
-            for i in 0..10 {
+            for i in 0..9 {
                 let ai = &uplines[i];
                 let expected_key = Pubkey::find_program_address(&[b"user", expected_wallet.as_ref()], &crate::ID).0;
                 require!(ai.key() == expected_key, ProtocolError::InvalidUpline);
@@ -404,9 +399,7 @@ pub mod service_referral_protocol {
                 require!(upline.wallet == expected_wallet, ProtocolError::InvalidUpline);
 
                 if upline.is_technical_root() {
-                    for remaining in levels.iter().skip(i) {
-                        unallocated = unallocated.checked_add(*remaining).ok_or(ProtocolError::ArithmeticOverflow)?;
-                    }
+                    for remaining in levels.iter().skip(i) { unallocated = unallocated.checked_add(*remaining).ok_or(ProtocolError::ArithmeticOverflow)?; }
                     break;
                 }
 
@@ -490,9 +483,7 @@ pub struct Initialize<'info> {
     #[account(mut)] pub initializer: Signer<'info>,
     /// CHECK: immutable treasury address stored in ProtocolState.
     pub service_treasury: UncheckedAccount<'info>,
-    /// Canonical SPL mint; initialization also enforces six decimals.
     pub usdt_mint: Box<Account<'info, Mint>>,
-    /// Canonical SPL mint; initialization also enforces six decimals.
     pub usdc_mint: Box<Account<'info, Mint>>,
     #[account(init, payer = initializer, seeds = [b"protocol"], bump, space = ProtocolState::SPACE)]
     pub protocol: Box<Account<'info, ProtocolState>>,
@@ -544,28 +535,26 @@ pub struct PurchaseAndDistribute<'info> {
     #[account(mut)] pub usdc_vault: Box<Account<'info, TokenAccount>>,
     #[account(mut)] pub service_treasury_usdt: Box<Account<'info, TokenAccount>>,
     #[account(mut)] pub service_treasury_usdc: Box<Account<'info, TokenAccount>>,
-    /// Direct sponsor. Canonical PDA and immutable relationship are verified in the handler.
+    /// Direct sponsor = genealogical L1. Canonical PDA and immutable relationship are verified in the handler.
     #[account(mut)] pub direct_referrer: Box<Account<'info, UserState>>,
-    /// CHECK: verified dynamically against immutable ancestry.
+    /// CHECK: genealogical L2, verified dynamically against immutable ancestry.
     #[account(mut)] pub upline_1: UncheckedAccount<'info>,
-    /// CHECK: verified dynamically against immutable ancestry.
+    /// CHECK: genealogical L3.
     #[account(mut)] pub upline_2: UncheckedAccount<'info>,
-    /// CHECK: verified dynamically against immutable ancestry.
+    /// CHECK: genealogical L4.
     #[account(mut)] pub upline_3: UncheckedAccount<'info>,
-    /// CHECK: verified dynamically against immutable ancestry.
+    /// CHECK: genealogical L5.
     #[account(mut)] pub upline_4: UncheckedAccount<'info>,
-    /// CHECK: verified dynamically against immutable ancestry.
+    /// CHECK: genealogical L6.
     #[account(mut)] pub upline_5: UncheckedAccount<'info>,
-    /// CHECK: verified dynamically against immutable ancestry.
+    /// CHECK: genealogical L7.
     #[account(mut)] pub upline_6: UncheckedAccount<'info>,
-    /// CHECK: verified dynamically against immutable ancestry.
+    /// CHECK: genealogical L8.
     #[account(mut)] pub upline_7: UncheckedAccount<'info>,
-    /// CHECK: verified dynamically against immutable ancestry.
+    /// CHECK: genealogical L9.
     #[account(mut)] pub upline_8: UncheckedAccount<'info>,
-    /// CHECK: verified dynamically against immutable ancestry.
+    /// CHECK: genealogical L10.
     #[account(mut)] pub upline_9: UncheckedAccount<'info>,
-    /// CHECK: verified dynamically against immutable ancestry.
-    #[account(mut)] pub upline_10: UncheckedAccount<'info>,
     #[account(init, payer = wallet, seeds = [b"batch", wallet.key().as_ref(), &user.next_batch_index.to_le_bytes()], bump, space = UnitBatch::SPACE)]
     pub batch: Box<Account<'info, UnitBatch>>,
     pub token_program: Program<'info, Token>,
@@ -688,9 +677,7 @@ fn update_activity_after_purchase(user: &mut UserState, units: u64, now: i64, pr
         user.qualification_progress_units = 0;
         user.qualification_window_started_at = 0;
     }
-    if user.qualification_progress_units == 0 {
-        user.qualification_window_started_at = now;
-    }
+    if user.qualification_progress_units == 0 { user.qualification_window_started_at = now; }
     user.qualification_progress_units = user.qualification_progress_units.checked_add(units).ok_or(ProtocolError::ArithmeticOverflow)?;
 
     if user.qualification_progress_units >= ACTIVITY_THRESHOLD_UNITS {
@@ -795,12 +782,10 @@ fn accrue_pioneer(p: &mut ProtocolState, mint: Pubkey, amount: u64) -> Result<u6
 
     let remainder_scaled = if mint == p.usdt_mint {
         p.pioneer_index_usdt = p.pioneer_index_usdt.checked_add(per_share_scaled).ok_or(ProtocolError::ArithmeticOverflow)?;
-        p.pioneer_unassigned_remainder_usdt_scaled
-            .checked_add(unassigned_scaled).ok_or(ProtocolError::ArithmeticOverflow)?
+        p.pioneer_unassigned_remainder_usdt_scaled.checked_add(unassigned_scaled).ok_or(ProtocolError::ArithmeticOverflow)?
     } else if mint == p.usdc_mint {
         p.pioneer_index_usdc = p.pioneer_index_usdc.checked_add(per_share_scaled).ok_or(ProtocolError::ArithmeticOverflow)?;
-        p.pioneer_unassigned_remainder_usdc_scaled
-            .checked_add(unassigned_scaled).ok_or(ProtocolError::ArithmeticOverflow)?
+        p.pioneer_unassigned_remainder_usdc_scaled.checked_add(unassigned_scaled).ok_or(ProtocolError::ArithmeticOverflow)?
     } else {
         return err!(ProtocolError::UnsupportedToken);
     };
@@ -919,11 +904,7 @@ fn validate_initialization_environment(
         require_keys_eq!(service_treasury, MAINNET_SERVICE_TREASURY, ProtocolError::InvalidProductionConfig);
         require_keys_eq!(usdt_mint, MAINNET_USDT_MINT, ProtocolError::InvalidProductionConfig);
         require_keys_eq!(usdc_mint, MAINNET_USDC_MINT, ProtocolError::InvalidProductionConfig);
-        require_keys_eq!(
-            qualified_revenue_source,
-            MAINNET_QUALIFIED_REVENUE_SOURCE,
-            ProtocolError::InvalidProductionConfig
-        );
+        require_keys_eq!(qualified_revenue_source, MAINNET_QUALIFIED_REVENUE_SOURCE, ProtocolError::InvalidProductionConfig);
         require!(registration_open_at == MAINNET_REGISTRATION_OPEN_AT, ProtocolError::InvalidProductionConfig);
     }
     #[cfg(not(feature = "production"))]
