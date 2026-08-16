@@ -23,6 +23,10 @@ EXPECTED = {
     "service_treasury": "AepYo8xanmKuRiLVeYQuCTJoQr1nyKiTApoKwHMEg8fn",
     "usdt_mint": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
     "usdc_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "economics_profile": "SELF50_NETWORK43_PIONEER2_SERVICE5",
+    "pioneer_position_cap": 100,
+    "pioneer_single_purchase_units": 1000,
+    "pioneer_rule_b": True,
 }
 DEVELOPMENT_PROGRAM_IDS = {"4AuoBkj4vkH2K1jwUuECtVBqF6Q74efjGbaw7btuNjRV"}
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -186,8 +190,12 @@ def main() -> int:
 
     required = [
         "commit_sha", "program_id", "registration_open_at", "service_treasury",
-        "usdt_mint", "usdc_mint", "so_sha256", "audit_report_sha256",
-        "verified_build_run_url", "audit_status", "smoke_test_plan_approved",
+        "usdt_mint", "usdc_mint", "economics_profile", "pioneer_position_cap",
+        "pioneer_single_purchase_units", "pioneer_rule_b", "so_sha256",
+        "audit_report_sha256", "protocol_ci_run_url", "rustsec_run_url",
+        "verified_build_run_url", "devnet_smoke_run_url",
+        "devnet_smoke_evidence_sha256", "devnet_smoke_status", "audit_status",
+        "smoke_test_plan_approved",
     ]
     for key in required:
         if manifest.get(key) in (None, "", 0, False):
@@ -200,20 +208,23 @@ def main() -> int:
     }
     for key, expected in expected_manifest.items():
         if manifest.get(key) != expected:
-            blockers.append(f"release manifest {key} does not match frozen source")
+            blockers.append(f"release manifest {key} does not match frozen source/economics")
 
     if source_sha and manifest.get("commit_sha") != source_sha:
         blockers.append("release manifest commit_sha does not match release source SHA")
 
-    for key in ("so_sha256", "audit_report_sha256"):
+    for key in ("so_sha256", "audit_report_sha256", "devnet_smoke_evidence_sha256"):
         value = manifest.get(key)
         if value and not SHA256_RE.fullmatch(str(value)):
             blockers.append(f"release manifest {key} is not a lowercase SHA-256 digest")
 
-    build_url = manifest.get("verified_build_run_url")
-    if build_url and not ACTIONS_RUN_RE.fullmatch(str(build_url)):
-        blockers.append("verified_build_run_url is not a GitHub Actions run URL")
+    for key in ("protocol_ci_run_url", "rustsec_run_url", "verified_build_run_url", "devnet_smoke_run_url"):
+        value = manifest.get(key)
+        if value and not ACTIONS_RUN_RE.fullmatch(str(value)):
+            blockers.append(f"{key} is not a GitHub Actions run URL")
 
+    if manifest.get("devnet_smoke_status") != "passed":
+        blockers.append("final devnet smoke status is not 'passed'")
     if manifest.get("audit_status") != "passed":
         blockers.append("independent audit status is not 'passed'")
     if manifest.get("smoke_test_plan_approved") is not True:
