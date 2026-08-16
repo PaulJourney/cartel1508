@@ -14,7 +14,7 @@ fn read_user(ctx: &AnchorLiteSVM, pda: Pubkey) -> UserState {
 }
 
 #[test]
-fn full_genealogy_pays_l1_direct_and_l2_through_l10_but_never_l11() {
+fn full_genealogy_pays_self_and_nine_uplines_but_never_tenth_upline() {
     let mut ctx = AnchorLiteSVM::build_with_program(ID, PROGRAM_BYTES);
     let initializer = ctx
         .svm
@@ -26,7 +26,7 @@ fn full_genealogy_pays_l1_direct_and_l2_through_l10_but_never_l11() {
         .expect("treasury");
 
     // Index mapping is deliberately top-down:
-    // 0=L11, 1=L10, ... 9=L2, 10=L1, 11=buyer.
+    // 0=U11, 1=U10, 2=U9, ... 10=U1/sponsor, 11=buyer/SELF.
     let mut wallets = Vec::new();
     for _ in 0..12 {
         wallets.push(
@@ -76,7 +76,7 @@ fn full_genealogy_pays_l1_direct_and_l2_through_l10_but_never_l11() {
         .expect("initialize tx")
         .assert_success();
 
-    // Register a real chain L11 -> L10 -> ... -> L1 -> buyer.
+    // Register a real ancestor chain ending at the buyer.
     for i in 0..wallets.len() {
         let (referrer_wallet, referrer_pda) = if i == 0 {
             (Pubkey::default(), technical_root)
@@ -140,10 +140,8 @@ fn full_genealogy_pays_l1_direct_and_l2_through_l10_but_never_l11() {
     );
     ctx.svm.send_transaction(create_vaults).expect("create vaults");
 
-    // Activate L10 through L2. L11 intentionally remains inactive; if the target
-    // purchase ever traversed an accidental eleventh level, its accounting would
-    // still change (expired), which we assert does not happen.
-    for i in 1..=9 {
+    // Activate exactly the nine payable uplines U9 through U1. U10/U11 stay inactive.
+    for i in 2..=10 {
         let source = ctx
             .svm
             .create_associated_token_account(&usdc_mint.pubkey(), &wallets[i])
@@ -152,9 +150,9 @@ fn full_genealogy_pays_l1_direct_and_l2_through_l10_but_never_l11() {
             .mint_to(&usdc_mint.pubkey(), &source, &initializer, 10 * UNIT)
             .expect("mint activation funds");
 
-        let mut uplines = [technical_root; 9];
+        let mut uplines = [technical_root; 8];
         let mut ancestor = i as isize - 2;
-        for slot in 0..9 {
+        for slot in 0..8 {
             if ancestor >= 0 {
                 uplines[slot] = user_pdas[ancestor as usize];
                 ancestor -= 1;
@@ -225,7 +223,7 @@ fn full_genealogy_pays_l1_direct_and_l2_through_l10_but_never_l11() {
         &ID,
     );
 
-    // buyer -> L1(index10) direct; network array is exactly L2(index9) ... L10(index1).
+    // buyer receives SELF 50%; sponsor index10 is U1, then indices9..2 are U2..U9.
     let target_ix = ctx
         .program()
         .accounts(service_referral_protocol::accounts::PurchaseAndDistribute {
@@ -265,19 +263,22 @@ fn full_genealogy_pays_l1_direct_and_l2_through_l10_but_never_l11() {
         .map(|pda| read_user(&ctx, *pda))
         .collect();
 
-    // L1 receives exactly the direct 50% and no network-depth reward.
+    // Buyer is SELF and receives exactly 50%; target purchase gives the sponsor no SELF delta.
     assert_eq!(
-        after[10].self_accrued_usdc - before[10].self_accrued_usdc,
+        after[11].self_accrued_usdc - before[11].self_accrued_usdc,
         50 * UNIT
     );
     assert_eq!(
-        after[10].network_claimable_usdc - before[10].network_claimable_usdc,
+        after[10].self_accrued_usdc - before[10].self_accrued_usdc,
         0
     );
 
-    // Genealogical L2-L10 map to indices 9 down to 1.
+    // U1 sponsor gets 15%, followed by U2..U9 across indices 9 down to 2.
+    assert_eq!(
+        after[10].network_claimable_usdc - before[10].network_claimable_usdc,
+        15 * UNIT
+    );
     let expected = [
-        15 * UNIT,
         9 * UNIT,
         6 * UNIT,
         4 * UNIT,
@@ -292,15 +293,15 @@ fn full_genealogy_pays_l1_direct_and_l2_through_l10_but_never_l11() {
         assert_eq!(
             after[index].network_claimable_usdc - before[index].network_claimable_usdc,
             *amount,
-            "unexpected network delta at genealogical level {}",
+            "unexpected network delta at upline {}",
             offset + 2
         );
     }
 
-    // L11 exists and is the real parent of L10, but it is not part of the supplied
-    // production account set. The target purchase must not alter any of its network
-    // buckets, including expired accounting while inactive.
-    assert_eq!(after[0].network_claimable_usdc, before[0].network_claimable_usdc);
-    assert_eq!(after[0].network_pending_usdc, before[0].network_pending_usdc);
-    assert_eq!(after[0].lifetime_expired_usdc, before[0].lifetime_expired_usdc);
+    // U10 and U11 exist in the real ancestry but are outside the nine-upline cap.
+    for index in [0usize, 1usize] {
+        assert_eq!(after[index].network_claimable_usdc, before[index].network_claimable_usdc);
+        assert_eq!(after[index].network_pending_usdc, before[index].network_pending_usdc);
+        assert_eq!(after[index].lifetime_expired_usdc, before[index].lifetime_expired_usdc);
+    }
 }

@@ -156,8 +156,8 @@ fn purchase_is_the_single_revenue_event_and_recipients_pull_claims() {
         .assert_success();
 
     ctx.svm.assert_token_balance(&sponsor_usdc, 0);
-    ctx.svm.assert_token_balance(&treasury_usdc, 9_998_000);
-    ctx.svm.assert_token_balance(&vault_usdc, 2_000);
+    ctx.svm.assert_token_balance(&treasury_usdc, 4_998_000);
+    ctx.svm.assert_token_balance(&vault_usdc, 5_002_000);
 
     let register_buyer_ix = ctx
         .program()
@@ -212,35 +212,37 @@ fn purchase_is_the_single_revenue_event_and_recipients_pull_claims() {
         .expect("buyer purchase tx")
         .assert_success();
 
-    let direct = 50 * UNIT;
-    let network_unallocated = 43 * UNIT;
+    let self_reward = 50 * UNIT;
+    let sponsor_network = 15 * UNIT;
+    let network_unallocated = 28 * UNIT;
     let service_fee = 5 * UNIT;
     let pioneer_pool = 2 * UNIT;
     let pioneer_per_slot = pioneer_pool / 100;
     let pioneer_assigned = pioneer_per_slot * 2;
     let pioneer_unassigned = pioneer_pool - pioneer_assigned;
     let purchase_treasury_delta = network_unallocated + service_fee + pioneer_unassigned;
-    let purchase_vault_liability = direct + pioneer_assigned;
+    let purchase_vault_liability = self_reward + sponsor_network + pioneer_assigned;
 
-    assert_eq!(purchase_treasury_delta, 49_960_000);
-    assert_eq!(purchase_vault_liability, 50_040_000);
+    assert_eq!(purchase_treasury_delta, 34_960_000);
+    assert_eq!(purchase_vault_liability, 65_040_000);
     assert_eq!(purchase_treasury_delta + purchase_vault_liability, 100 * UNIT);
 
     ctx.svm.assert_token_balance(&buyer_usdc, 0);
-    ctx.svm.assert_token_balance(&treasury_usdc, 9_998_000 + purchase_treasury_delta);
-    ctx.svm.assert_token_balance(&vault_usdc, 2_000 + purchase_vault_liability);
+    ctx.svm.assert_token_balance(&treasury_usdc, 4_998_000 + purchase_treasury_delta);
+    ctx.svm.assert_token_balance(&vault_usdc, 5_002_000 + purchase_vault_liability);
 
     let sponsor_account = ctx.svm.get_account(&sponsor_pda).expect("sponsor state");
     let mut sponsor_data = sponsor_account.data.as_slice();
     let sponsor_state = UserState::try_deserialize(&mut sponsor_data).expect("deserialize sponsor");
-    assert_eq!(sponsor_state.self_accrued_usdc, direct);
-    assert_eq!(sponsor_state.network_claimable_usdc, 0);
+    assert_eq!(sponsor_state.self_accrued_usdc, 5 * UNIT);
+    assert_eq!(sponsor_state.network_claimable_usdc, sponsor_network);
     assert!(sponsor_state.active_until > 0);
 
     let buyer_account = ctx.svm.get_account(&buyer_pda).expect("buyer state");
     let mut buyer_data = buyer_account.data.as_slice();
     let buyer_state = UserState::try_deserialize(&mut buyer_data).expect("deserialize buyer");
     assert_eq!(buyer_state.lifetime_service_units, 100);
+    assert_eq!(buyer_state.self_accrued_usdc, self_reward);
     assert!(buyer_state.active_until > 0);
 
     let protocol_account = ctx.svm.get_account(&protocol_pda).expect("protocol state");
@@ -248,10 +250,10 @@ fn purchase_is_the_single_revenue_event_and_recipients_pull_claims() {
     let protocol = ProtocolState::try_deserialize(&mut protocol_data).expect("deserialize protocol");
     assert_eq!(protocol.pioneer_count, 2);
     assert_eq!(protocol.lifetime_service_fees_usdc, 500_000 + service_fee as u128);
-    assert_eq!(protocol.lifetime_unallocated_usdc, 9_300_000 + network_unallocated as u128);
+    assert_eq!(protocol.lifetime_unallocated_usdc, 4_300_000 + network_unallocated as u128);
     assert_eq!(protocol.lifetime_pioneer_unassigned_usdc, 198_000 + pioneer_unassigned as u128);
 
-    let sponsor_claim = direct + 22_000;
+    let sponsor_claim = 5 * UNIT + sponsor_network + 22_000;
     let sponsor_claim_ix = ctx
         .program()
         .accounts(service_referral_protocol::accounts::Claim {
@@ -271,7 +273,7 @@ fn purchase_is_the_single_revenue_event_and_recipients_pull_claims() {
         .assert_success();
 
     ctx.svm.assert_token_balance(&sponsor_usdc, sponsor_claim);
-    ctx.svm.assert_token_balance(&vault_usdc, pioneer_per_slot);
+    ctx.svm.assert_token_balance(&vault_usdc, self_reward + pioneer_per_slot);
 
     let buyer_claim_ix = ctx
         .program()
@@ -291,7 +293,7 @@ fn purchase_is_the_single_revenue_event_and_recipients_pull_claims() {
         .expect("buyer claim tx")
         .assert_success();
 
-    ctx.svm.assert_token_balance(&buyer_usdc, pioneer_per_slot);
+    ctx.svm.assert_token_balance(&buyer_usdc, self_reward + pioneer_per_slot);
     ctx.svm.assert_token_balance(&vault_usdc, 0);
 
     let sponsor_account = ctx.svm.get_account(&sponsor_pda).expect("sponsor after claim");
