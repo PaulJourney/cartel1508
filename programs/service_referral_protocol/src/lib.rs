@@ -126,7 +126,16 @@ pub mod service_referral_protocol {
         Ok(())
     }
 
+    // Legacy development-only purchase path retained temporarily for regression
+    // comparison. Production must use purchase_and_distribute so a unit purchase
+    // cannot bypass the 50/43/2/5 economics.
     pub fn purchase_service_units(ctx: Context<PurchaseServiceUnits>, units: u64) -> Result<()> {
+        #[cfg(feature = "production")]
+        {
+            let _ = (&ctx, units);
+            return err!(ProtocolError::LegacyRevenuePathDisabled);
+        }
+
         require!(units > 0, ProtocolError::ZeroUnits);
         let payment_u128 = (units as u128).checked_mul(TOKEN_SCALE as u128).ok_or(ProtocolError::ArithmeticOverflow)?;
         let payment = u64::try_from(payment_u128).map_err(|_| ProtocolError::BatchTooLarge)?;
@@ -169,39 +178,15 @@ pub mod service_referral_protocol {
             payment,
         )?;
 
-        let (first_unit_id, last_unit_id, next_unit_id) =
-            allocate_unit_range(ctx.accounts.protocol.next_unit_id, units)?;
+        let (first_unit_id, last_unit_id, next_unit_id) = allocate_unit_range(ctx.accounts.protocol.next_unit_id, units)?;
         ctx.accounts.protocol.next_unit_id = next_unit_id;
 
-        let user = &mut ctx.accounts.user;
-        user.lifetime_service_units = user.lifetime_service_units
-            .checked_add(units as u128).ok_or(ProtocolError::ArithmeticOverflow)?;
-        user.next_batch_index = user.next_batch_index.checked_add(1).ok_or(ProtocolError::ArithmeticOverflow)?;
-
-        if user.qualification_progress_units > 0
-            && user.qualification_window_started_at > 0
-            && now > user.qualification_window_started_at.checked_add(ACTIVE_SECONDS).ok_or(ProtocolError::ArithmeticOverflow)?
-        {
-            user.qualification_progress_units = 0;
-            user.qualification_window_started_at = 0;
-        }
-        if user.qualification_progress_units == 0 {
-            user.qualification_window_started_at = now;
-        }
-        user.qualification_progress_units = user.qualification_progress_units.checked_add(units).ok_or(ProtocolError::ArithmeticOverflow)?;
-
-        if user.qualification_progress_units >= ACTIVITY_THRESHOLD_UNITS {
-            user.qualification_progress_units = 0;
-            user.qualification_window_started_at = 0;
-            user.active_until = now.checked_add(ACTIVE_SECONDS).ok_or(ProtocolError::ArithmeticOverflow)?;
-            user.grace_until = user.active_until.checked_add(GRACE_SECONDS).ok_or(ProtocolError::ArithmeticOverflow)?;
-            if pre_status == ActivityStatus::Grace { vest_pending(user)?; }
-        }
+        update_activity_after_purchase(&mut ctx.accounts.user, units, now, pre_status)?;
 
         let batch = &mut ctx.accounts.batch;
         batch.bump = ctx.bumps.batch;
         batch.owner = ctx.accounts.wallet.key();
-        batch.batch_index = user.next_batch_index - 1;
+        batch.batch_index = ctx.accounts.user.next_batch_index - 1;
         batch.mint = ctx.accounts.user_source.mint;
         batch.units = units;
         batch.first_unit_id = first_unit_id;
@@ -210,7 +195,15 @@ pub mod service_referral_protocol {
         Ok(())
     }
 
+    // Legacy externally-qualified revenue path. It remains available in development
+    // for historical/adversarial regression tests but is fail-closed in production.
     pub fn record_qualified_revenue<'info>(ctx: Context<'info, RecordQualifiedRevenue<'info>>, amount: u64) -> Result<()> {
+        #[cfg(feature = "production")]
+        {
+            let _ = (&ctx, amount);
+            return err!(ProtocolError::LegacyRevenuePathDisabled);
+        }
+
         require!(amount > 0, ProtocolError::ZeroAmount);
         let now = Clock::get()?.unix_timestamp;
         let p = &mut ctx.accounts.protocol;
@@ -317,6 +310,153 @@ pub mod service_referral_protocol {
         Ok(())
     }
 
+    // Final economic path: every 1 USDT/USDC unit purchase is itself the revenue
+    // event. The buyer signs once and pays the transaction fee; recipients only
+    // accrue on-chain balances and later pay gas when they choose to claim.
+    pub fn purchase_and_distribute<'info>(ctx: Context<'info, PurchaseAndDistribute<'info>>, units: u64) -> Result<()> {
+        require!(units > 0, ProtocolError::ZeroUnits);
+        let payment_u128 = (units as u128).checked_mul(TOKEN_SCALE as u128).ok_or(ProtocolError::ArithmeticOverflow)?;
+        let payment = u64::try_from(payment_u128).map_err(|_| ProtocolError::BatchTooLarge)?;
+        let now = Clock::get()?.unix_timestamp;
+        let pre_status = activity_status(&ctx.accounts.user, now);
+        let mint = ctx.accounts.user_source.mint;
+
+        validate_supported_source(&ctx.accounts.protocol, &ctx.accounts.user_source)?;
+        require!(ctx.accounts.user_source.owner == ctx.accounts.wallet.key(), ProtocolError::WrongTokenAuthority);
+        validate_vault_token_for_mint(&ctx.accounts.protocol, ctx.accounts.protocol.usdt_mint, &ctx.accounts.usdt_vault, ctx.accounts.vault_authority.key())?;
+        validate_vault_token_for_mint(&ctx.accounts.protocol, ctx.accounts.protocol.usdc_mint, &ctx.accounts.usdc_vault, ctx.accounts.vault_authority.key())?;
+        validate_treasury_token_for_mint(&ctx.accounts.protocol, ctx.accounts.protocol.usdt_mint, &ctx.accounts.service_treasury_usdt)?;
+        validate_treasury_token_for_mint(&ctx.accounts.protocol, ctx.accounts.protocol.usdc_mint, &ctx.accounts.service_treasury_usdc)?;
+        validate_user_pda(&ctx.accounts.user)?;
+        validate_user_pda(&ctx.accounts.direct_referrer)?;
+        require!(ctx.accounts.direct_referrer.wallet == ctx.accounts.user.referrer, ProtocolError::ReferrerMismatch);
+
+        settle_expired_all(
+            &mut ctx.accounts.user,
+            now,
+            &mut ctx.accounts.protocol,
+            &ctx.accounts.vault_authority,
+            &ctx.accounts.usdt_vault,
+            &ctx.accounts.usdc_vault,
+            &ctx.accounts.service_treasury_usdt,
+            &ctx.accounts.service_treasury_usdc,
+            &ctx.accounts.token_program,
+        )?;
+
+        let payment_destination = if mint == ctx.accounts.protocol.usdt_mint {
+            ctx.accounts.usdt_vault.to_account_info()
+        } else {
+            ctx.accounts.usdc_vault.to_account_info()
+        };
+        token::transfer(
+            CpiContext::new(
+                token::ID,
+                Transfer {
+                    from: ctx.accounts.user_source.to_account_info(),
+                    to: payment_destination,
+                    authority: ctx.accounts.wallet.to_account_info(),
+                },
+            ),
+            payment,
+        )?;
+
+        let (first_unit_id, last_unit_id, next_unit_id) = allocate_unit_range(ctx.accounts.protocol.next_unit_id, units)?;
+        ctx.accounts.protocol.next_unit_id = next_unit_id;
+        update_activity_after_purchase(&mut ctx.accounts.user, units, now, pre_status)?;
+
+        let batch = &mut ctx.accounts.batch;
+        batch.bump = ctx.bumps.batch;
+        batch.owner = ctx.accounts.wallet.key();
+        batch.batch_index = ctx.accounts.user.next_batch_index - 1;
+        batch.mint = mint;
+        batch.units = units;
+        batch.first_unit_id = first_unit_id;
+        batch.last_unit_id = last_unit_id;
+        batch.purchased_at = now;
+
+        let (direct, levels, pioneer, service, rounding_remainder) = split_amount(payment)?;
+        let p = &mut ctx.accounts.protocol;
+        let mut unallocated: u64 = 0;
+        let mut expired_flow: u64 = 0;
+
+        if ctx.accounts.direct_referrer.is_technical_root() {
+            unallocated = unallocated.checked_add(direct).ok_or(ProtocolError::ArithmeticOverflow)?;
+            for level in levels {
+                unallocated = unallocated.checked_add(level).ok_or(ProtocolError::ArithmeticOverflow)?;
+            }
+        } else {
+            add_direct(&mut ctx.accounts.direct_referrer, p, mint, direct)?;
+
+            let uplines = [
+                ctx.accounts.upline_1.as_ref(), ctx.accounts.upline_2.as_ref(),
+                ctx.accounts.upline_3.as_ref(), ctx.accounts.upline_4.as_ref(),
+                ctx.accounts.upline_5.as_ref(), ctx.accounts.upline_6.as_ref(),
+                ctx.accounts.upline_7.as_ref(), ctx.accounts.upline_8.as_ref(),
+                ctx.accounts.upline_9.as_ref(), ctx.accounts.upline_10.as_ref(),
+            ];
+            let mut expected_wallet = ctx.accounts.direct_referrer.referrer;
+
+            for i in 0..10 {
+                let ai = &uplines[i];
+                let expected_key = Pubkey::find_program_address(&[b"user", expected_wallet.as_ref()], &crate::ID).0;
+                require!(ai.key() == expected_key, ProtocolError::InvalidUpline);
+                let mut upline: Account<UserState> = Account::try_from(ai)?;
+                require!(upline.wallet == expected_wallet, ProtocolError::InvalidUpline);
+
+                if upline.is_technical_root() {
+                    for remaining in levels.iter().skip(i) {
+                        unallocated = unallocated.checked_add(*remaining).ok_or(ProtocolError::ArithmeticOverflow)?;
+                    }
+                    break;
+                }
+
+                let previously_expired = expire_pending_for_mint(&mut upline, now, p, mint)?;
+                expired_flow = expired_flow.checked_add(previously_expired).ok_or(ProtocolError::ArithmeticOverflow)?;
+                match activity_status(&upline, now) {
+                    ActivityStatus::Active => add_network_claimable(&mut upline, p, mint, levels[i])?,
+                    ActivityStatus::Grace => add_network_pending(&mut upline, p, mint, levels[i])?,
+                    ActivityStatus::Inactive => {
+                        mark_user_expired(&mut upline, p, mint, levels[i])?;
+                        expired_flow = expired_flow.checked_add(levels[i]).ok_or(ProtocolError::ArithmeticOverflow)?;
+                    }
+                }
+                expected_wallet = upline.referrer;
+                upline.exit(&crate::ID)?;
+            }
+        }
+
+        let pioneer_unassigned = accrue_pioneer(p, mint, pioneer)?;
+        let treasury_now = service
+            .checked_add(rounding_remainder).ok_or(ProtocolError::ArithmeticOverflow)?
+            .checked_add(unallocated).ok_or(ProtocolError::ArithmeticOverflow)?
+            .checked_add(expired_flow).ok_or(ProtocolError::ArithmeticOverflow)?
+            .checked_add(pioneer_unassigned).ok_or(ProtocolError::ArithmeticOverflow)?;
+
+        if treasury_now > 0 {
+            if mint == p.usdt_mint {
+                transfer_from_vault(
+                    p,
+                    &ctx.accounts.vault_authority,
+                    &ctx.accounts.usdt_vault,
+                    &ctx.accounts.service_treasury_usdt,
+                    &ctx.accounts.token_program,
+                    treasury_now,
+                )?;
+            } else {
+                transfer_from_vault(
+                    p,
+                    &ctx.accounts.vault_authority,
+                    &ctx.accounts.usdc_vault,
+                    &ctx.accounts.service_treasury_usdc,
+                    &ctx.accounts.token_program,
+                    treasury_now,
+                )?;
+            }
+        }
+        add_protocol_treasury_metrics(p, mint, service, unallocated, rounding_remainder, pioneer_unassigned)?;
+        Ok(())
+    }
+
     pub fn claim(ctx: Context<Claim>) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
         let p = &ctx.accounts.protocol;
@@ -386,6 +526,46 @@ pub struct PurchaseServiceUnits<'info> {
     #[account(mut)] pub usdc_vault: Box<Account<'info, TokenAccount>>,
     #[account(mut)] pub service_treasury_usdt: Box<Account<'info, TokenAccount>>,
     #[account(mut)] pub service_treasury_usdc: Box<Account<'info, TokenAccount>>,
+    #[account(init, payer = wallet, seeds = [b"batch", wallet.key().as_ref(), &user.next_batch_index.to_le_bytes()], bump, space = UnitBatch::SPACE)]
+    pub batch: Box<Account<'info, UnitBatch>>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct PurchaseAndDistribute<'info> {
+    #[account(mut)] pub wallet: Signer<'info>,
+    #[account(mut, seeds = [b"protocol"], bump = protocol.bump)] pub protocol: Box<Account<'info, ProtocolState>>,
+    #[account(mut, seeds = [b"user", wallet.key().as_ref()], bump = user.bump)] pub user: Box<Account<'info, UserState>>,
+    #[account(mut)] pub user_source: Box<Account<'info, TokenAccount>>,
+    /// CHECK: PDA authority validated by seeds and canonical vault checks.
+    #[account(seeds = [b"vault-authority"], bump = protocol.vault_authority_bump)] pub vault_authority: UncheckedAccount<'info>,
+    #[account(mut)] pub usdt_vault: Box<Account<'info, TokenAccount>>,
+    #[account(mut)] pub usdc_vault: Box<Account<'info, TokenAccount>>,
+    #[account(mut)] pub service_treasury_usdt: Box<Account<'info, TokenAccount>>,
+    #[account(mut)] pub service_treasury_usdc: Box<Account<'info, TokenAccount>>,
+    /// Direct sponsor. Canonical PDA and immutable relationship are verified in the handler.
+    #[account(mut)] pub direct_referrer: Box<Account<'info, UserState>>,
+    /// CHECK: verified dynamically against immutable ancestry.
+    #[account(mut)] pub upline_1: UncheckedAccount<'info>,
+    /// CHECK: verified dynamically against immutable ancestry.
+    #[account(mut)] pub upline_2: UncheckedAccount<'info>,
+    /// CHECK: verified dynamically against immutable ancestry.
+    #[account(mut)] pub upline_3: UncheckedAccount<'info>,
+    /// CHECK: verified dynamically against immutable ancestry.
+    #[account(mut)] pub upline_4: UncheckedAccount<'info>,
+    /// CHECK: verified dynamically against immutable ancestry.
+    #[account(mut)] pub upline_5: UncheckedAccount<'info>,
+    /// CHECK: verified dynamically against immutable ancestry.
+    #[account(mut)] pub upline_6: UncheckedAccount<'info>,
+    /// CHECK: verified dynamically against immutable ancestry.
+    #[account(mut)] pub upline_7: UncheckedAccount<'info>,
+    /// CHECK: verified dynamically against immutable ancestry.
+    #[account(mut)] pub upline_8: UncheckedAccount<'info>,
+    /// CHECK: verified dynamically against immutable ancestry.
+    #[account(mut)] pub upline_9: UncheckedAccount<'info>,
+    /// CHECK: verified dynamically against immutable ancestry.
+    #[account(mut)] pub upline_10: UncheckedAccount<'info>,
     #[account(init, payer = wallet, seeds = [b"batch", wallet.key().as_ref(), &user.next_batch_index.to_le_bytes()], bump, space = UnitBatch::SPACE)]
     pub batch: Box<Account<'info, UnitBatch>>,
     pub token_program: Program<'info, Token>,
@@ -493,6 +673,33 @@ fn validate_user_destination(wallet: Pubkey, mint: Pubkey, destination: &Account
 fn validate_user_pda(user: &Account<UserState>) -> Result<()> {
     let expected = Pubkey::find_program_address(&[b"user", user.wallet.as_ref()], &crate::ID).0;
     require!(user.key() == expected, ProtocolError::InvalidUserPda);
+    Ok(())
+}
+
+fn update_activity_after_purchase(user: &mut UserState, units: u64, now: i64, pre_status: ActivityStatus) -> Result<()> {
+    user.lifetime_service_units = user.lifetime_service_units
+        .checked_add(units as u128).ok_or(ProtocolError::ArithmeticOverflow)?;
+    user.next_batch_index = user.next_batch_index.checked_add(1).ok_or(ProtocolError::ArithmeticOverflow)?;
+
+    if user.qualification_progress_units > 0
+        && user.qualification_window_started_at > 0
+        && now > user.qualification_window_started_at.checked_add(ACTIVE_SECONDS).ok_or(ProtocolError::ArithmeticOverflow)?
+    {
+        user.qualification_progress_units = 0;
+        user.qualification_window_started_at = 0;
+    }
+    if user.qualification_progress_units == 0 {
+        user.qualification_window_started_at = now;
+    }
+    user.qualification_progress_units = user.qualification_progress_units.checked_add(units).ok_or(ProtocolError::ArithmeticOverflow)?;
+
+    if user.qualification_progress_units >= ACTIVITY_THRESHOLD_UNITS {
+        user.qualification_progress_units = 0;
+        user.qualification_window_started_at = 0;
+        user.active_until = now.checked_add(ACTIVE_SECONDS).ok_or(ProtocolError::ArithmeticOverflow)?;
+        user.grace_until = user.active_until.checked_add(GRACE_SECONDS).ok_or(ProtocolError::ArithmeticOverflow)?;
+        if pre_status == ActivityStatus::Grace { vest_pending(user)?; }
+    }
     Ok(())
 }
 
@@ -653,18 +860,18 @@ fn add_protocol_treasury_metrics(
     p: &mut ProtocolState,
     mint: Pubkey,
     service: u64,
-    unallocated_network: u64,
+    unallocated: u64,
     rounding: u64,
     pioneer_unassigned: u64,
 ) -> Result<()> {
     if mint == p.usdt_mint {
         p.lifetime_service_fees_usdt = p.lifetime_service_fees_usdt.checked_add(service as u128).ok_or(ProtocolError::ArithmeticOverflow)?;
-        p.lifetime_unallocated_usdt = p.lifetime_unallocated_usdt.checked_add(unallocated_network as u128).ok_or(ProtocolError::ArithmeticOverflow)?;
+        p.lifetime_unallocated_usdt = p.lifetime_unallocated_usdt.checked_add(unallocated as u128).ok_or(ProtocolError::ArithmeticOverflow)?;
         p.lifetime_rounding_usdt = p.lifetime_rounding_usdt.checked_add(rounding as u128).ok_or(ProtocolError::ArithmeticOverflow)?;
         p.lifetime_pioneer_unassigned_usdt = p.lifetime_pioneer_unassigned_usdt.checked_add(pioneer_unassigned as u128).ok_or(ProtocolError::ArithmeticOverflow)?;
     } else if mint == p.usdc_mint {
         p.lifetime_service_fees_usdc = p.lifetime_service_fees_usdc.checked_add(service as u128).ok_or(ProtocolError::ArithmeticOverflow)?;
-        p.lifetime_unallocated_usdc = p.lifetime_unallocated_usdc.checked_add(unallocated_network as u128).ok_or(ProtocolError::ArithmeticOverflow)?;
+        p.lifetime_unallocated_usdc = p.lifetime_unallocated_usdc.checked_add(unallocated as u128).ok_or(ProtocolError::ArithmeticOverflow)?;
         p.lifetime_rounding_usdc = p.lifetime_rounding_usdc.checked_add(rounding as u128).ok_or(ProtocolError::ArithmeticOverflow)?;
         p.lifetime_pioneer_unassigned_usdc = p.lifetime_pioneer_unassigned_usdc.checked_add(pioneer_unassigned as u128).ok_or(ProtocolError::ArithmeticOverflow)?;
     } else { return err!(ProtocolError::UnsupportedToken); }
@@ -717,20 +924,11 @@ fn validate_initialization_environment(
             MAINNET_QUALIFIED_REVENUE_SOURCE,
             ProtocolError::InvalidProductionConfig
         );
-        require!(
-            registration_open_at == MAINNET_REGISTRATION_OPEN_AT,
-            ProtocolError::InvalidProductionConfig
-        );
+        require!(registration_open_at == MAINNET_REGISTRATION_OPEN_AT, ProtocolError::InvalidProductionConfig);
     }
     #[cfg(not(feature = "production"))]
     {
-        let _ = (
-            service_treasury,
-            usdt_mint,
-            usdc_mint,
-            qualified_revenue_source,
-            registration_open_at,
-        );
+        let _ = (service_treasury, usdt_mint, usdc_mint, qualified_revenue_source, registration_open_at);
     }
     Ok(())
 }
@@ -760,6 +958,7 @@ pub enum ProtocolError {
     #[msg("No expired pending reward to settle")] NothingToSettle,
     #[msg("User is not active")] NotActive,
     #[msg("Nothing to claim")] NothingToClaim,
+    #[msg("Legacy purchase/qualified-revenue path is disabled in production")] LegacyRevenuePathDisabled,
     #[msg("Production source/time configuration has not been frozen")] ProductionConfigNotFrozen,
     #[msg("Production initialization does not match frozen mainnet configuration")] InvalidProductionConfig,
     #[msg("Supported stablecoin mint must use six decimals")] InvalidTokenDecimals,
