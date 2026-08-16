@@ -46,7 +46,7 @@ checks = {
     'treasury accounting buckets separated': all(x in state for x in ['lifetime_service_fees_', 'lifetime_unallocated_', 'lifetime_expired_', 'lifetime_rounding_', 'lifetime_pioneer_unassigned_']),
     'pull claim exists and requires active': 'ProtocolError::NotActive' in claim and 'take_claimable' in claim,
     'claim requires claimant wallet signer': "pub wallet: Signer<'info>" in source and 'seeds = [b"user", wallet.key().as_ref()]' in source,
-    'SPL token CPI uses typed token program': 'token_program.to_account_info()' in source and 'pub token_program: Program<' in source,
+    'SPL token CPI uses typed token program key': 'token_program.key()' in source and 'pub token_program: Program<' in source,
     'mainnet treasury and stablecoin constants are frozen': all(x in constants for x in ['MAINNET_USDT_MINT', 'MAINNET_USDC_MINT', 'MAINNET_SERVICE_TREASURY']),
     'production launch time remains fail closed': 'MAINNET_REGISTRATION_OPEN_AT: i64 = 0' in constants,
     'production initialization pins only final mainnet inputs': all(x in source for x in ['validate_initialization_environment(', 'MAINNET_SERVICE_TREASURY', 'MAINNET_USDT_MINT', 'MAINNET_USDC_MINT', 'MAINNET_REGISTRATION_OPEN_AT', 'ProductionConfigNotFrozen', 'InvalidProductionConfig']) and 'qualified_revenue' not in initialize,
