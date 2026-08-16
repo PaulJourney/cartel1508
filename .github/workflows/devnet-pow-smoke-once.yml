@@ -50,7 +50,7 @@ jobs:
 
           if [ "$funded" != "1" ]; then
             echo "Public RPC airdrop is rate-limited; using documented PoW faucet fallback."
-            cargo install devnet-pow --locked
+            cargo install devnet-pow
             timeout 1200s devnet-pow mine --target-lamports 2000000000 -ud || true
           fi
 
