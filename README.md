@@ -1,4 +1,4 @@
-# Service Referral Protocol — Solana V0.14
+# Service Referral Protocol — Solana V0.15
 
 Public development repository for an ownerless Solana/Anchor protocol foundation.
 
@@ -106,7 +106,7 @@ The currently declared Program ID is still a development identity. The final Pro
 
 ## Mainnet gate
 
-Do **not** make the program immutable on mainnet until all of these pass:
+Do **not** make the program immutable on mainnet until all of these pass. CI evidence must be generated on the exact current release-candidate commit; a workflow that requires approval or never creates jobs is not considered passing evidence.
 
 1. Final core production build on the pinned toolchain.
 2. Reference, Rust, LiteSVM integration and adversarial tests all green on the exact release commit.
