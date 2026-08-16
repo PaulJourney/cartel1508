@@ -1268,8 +1268,8 @@ pub enum ProtocolError {
     SelfReferral,
     #[msg("Units must be greater than zero")]
     ZeroUnits,
-    #[msg("Batch amount exceeds SPL token u64 capacity")]
-    BatchTooLarge,
+    #[msg("Purchase amount exceeds SPL token u64 capacity")]
+    PurchaseTooLarge,
     #[msg("Unsupported token")]
     UnsupportedToken,
     #[msg("Token mint mismatch")]
