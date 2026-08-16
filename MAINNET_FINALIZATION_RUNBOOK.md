@@ -1,81 +1,106 @@
-# Mainnet finalization runbook
+# Mainnet Finalization Runbook
 
-This runbook is intentionally conservative. Permanent immutability is the final step, never the deployment step.
+This procedure is intentionally conservative. **Permanent immutability is the final step, never the deployment step.**
 
-## 1. Freeze the real qualification semantics
+## 1. Freeze the final core surface
 
-Before a production Revenue Evidence source exists, `QUALIFIED_REVENUE_QUALIFICATION_SPEC.md` must define the exact economic event, funding provenance, beneficiary/amount derivation, event-ID derivation, evidence/reference-hash derivation, refund/reversal rules, trust source and supported assets.
+Before any mainnet deployment:
 
-The file must contain exactly one status marker and it must be:
+- `purchase_and_distribute` must be the sole production economic entrypoint;
+- all obsolete qualified-revenue source/adapter/evidence/qualification state and instructions must be removed from the final core;
+- final L1–L10 genealogy and 50/43/2/5 constants must be frozen;
+- service treasury and canonical USDT/USDC mints must be frozen;
+- registration-opening UTC must be frozen;
+- no mutable owner/admin instruction may remain.
 
-`QUALIFICATION_SPEC_STATUS: FINAL`
+## 2. Freeze the final Program ID
 
-Service-unit/activity purchases remain excluded from qualified revenue.
+Generate one final Service Referral Protocol Program ID keypair offline under `PROGRAM_ID_CUSTODY_RUNBOOK.md`.
 
-## 2. Implement the production Evidence source
+Commit only the public Program ID:
 
-Implement `programs/revenue_evidence` from the FINAL specification. Its immutable or explicitly reviewed trust source must deterministically emit the canonical evidence accepted by Revenue Qualification.
+- exact `declare_id!` in the program;
+- exact matching `[programs.mainnet]` entry in `Anchor.toml`.
 
-The current `integration-tests/fixtures/evidence_stub` is test-only infrastructure and must never be substituted for this production program.
+Never commit or paste the secret keypair.
 
-## 3. Freeze the four final program identities
+## 3. Build and test the exact final commit
 
-Generate four distinct Program ID keypairs outside the public repository and CI:
+From a clean checkout of the release commit:
 
-- Revenue Evidence;
-- Revenue Qualification;
-- Revenue Adapter;
-- Service Referral Protocol.
+- run `node tests/reference-model.mjs`;
+- run `python3 scripts/static-gates.py`;
+- run locked Rust tests;
+- run all final LiteSVM integration/adversarial tests;
+- run RustSec scan;
+- build the production SBF artifact with the pinned toolchain;
+- build the verifiable artifact;
+- record `.so` SHA-256, IDL, `Cargo.lock`, source commit and toolchain versions.
 
-Record only public Program IDs in source control. Freeze Evidence and Adapter Program IDs into Revenue Qualification; freeze Revenue Qualification into the Adapter; derive the Adapter's `[b"revenue-authority"]` PDA from its final Program ID; freeze both Adapter Program ID and that exact PDA into the Referral core. Freeze the final Referral Program ID in `declare_id!` and `[programs.mainnet]`. Freeze registration opening UTC in the same reviewed release set.
+Any source/configuration/dependency change after this point invalidates the artifact hash and requires the gates to be rerun.
 
-## 4. Rebuild and test the complete chain from the final commit
+## 4. Devnet smoke on the final interface
 
-- Run reference/static gates.
-- Run locked Rust/property/LiteSVM core tests.
-- Run Revenue Adapter static/unit/SBF gates.
-- Run Revenue Qualification unit/SBF gates.
-- Run production Revenue Evidence tests and SBF gates.
-- Run full `evidence -> qualification -> adapter -> referral` cross-program adversarial tests.
-- Run RustSec scans for all production dependency graphs.
-- Produce production artifacts for all four programs.
-- Produce verifiable-build evidence for all four.
-- Record each `.so` SHA-256, IDL, dependency lockfile, repository source commit and pinned toolchain versions.
+Before independent final sign-off, deploy a temporary/dev identity and exercise the same final instruction surface:
 
-Any change after this point invalidates the affected build evidence and requires the gates to be repeated.
+1. initialize;
+2. register a controlled genealogy;
+3. purchase units using USDC/USDT-compatible six-decimal test mints;
+4. verify global unit IDs and activity state;
+5. verify 50% direct / 43% L2–L10 / 2% Pioneer / 5% service accounting;
+6. verify canonical vault collateral;
+7. claim from an ACTIVE beneficiary using a separate claimant-signed transaction;
+8. test an invalid ancestry/account substitution and verify complete rollback;
+9. test grace/expiry behavior;
+10. verify final token conservation.
+
+Devnet evidence is workflow evidence only; it is not a substitute for mainnet bytecode verification or independent audit.
 
 ## 5. Independent audit
 
-Give the auditor the exact FINAL qualification specification, exact source commit and all artifact hashes. The audit scope must include:
+Give the auditor:
 
-- Revenue Evidence qualification/trust semantics and any upstream dependency capable of issuing evidence;
-- event identity, economic finality and anti-replay;
-- beneficiary, mint and amount binding;
-- Evidence-authority PDA -> Qualification boundary;
-- Qualification verifier PDA -> Adapter authorization;
-- Adapter RevenueAuthority canonical-ATA and prefunding checks;
-- Adapter receipt creation;
-- Adapter -> Referral CPI boundary;
-- Referral ancestry/activity/accounting behavior;
-- rollback atomicity across the complete transaction;
-- absence of mutable admin paths after finalization.
+- exact source commit;
+- final public Program ID;
+- final constants and registration UTC;
+- exact dependency lockfile;
+- final IDL;
+- exact production/verifiable artifact hash;
+- automated test/build evidence;
+- client transaction-builder source used to derive sponsor/upline accounts.
 
-Resolve accepted findings before deployment. If source, dependencies, constants, Program IDs or qualification semantics change, rebuild and re-verify the exact release submitted for deployment.
+Audit at minimum:
 
-## 6. Freeze release evidence and run the executable gate
+- purchase payment amount and token-account validation;
+- immutable referral ancestry and L2–L10 traversal;
+- 50/43/2/5 conservation and rounding;
+- ACTIVE/GRACE/INACTIVE behavior;
+- Pioneer indexing/fractional carry;
+- vault collateral and treasury routing;
+- pull claim authorization;
+- expiry settlement;
+- unit-ID overflow/continuity;
+- rollback atomicity;
+- absence of mutable admin/control paths;
+- client construction of all required accounts.
 
-Create `release/mainnet-release.json` from the example and populate only verified public evidence:
+Resolve every accepted finding. Any material code/configuration/dependency change requires a new exact artifact and appropriate renewed audit review.
 
-- exact audited source commit;
-- Evidence, Qualification, Adapter and Referral Program IDs;
-- exact Adapter-derived RevenueAuthority PDA;
-- registration UTC;
-- service treasury and stablecoin mints;
-- four production `.so` SHA-256 hashes;
-- FINAL qualification-spec SHA-256;
+## 6. Complete release evidence
+
+Create `release/mainnet-release.json` from the example and populate:
+
+- exact audited source commit SHA;
+- final Program ID;
+- registration-opening UTC;
+- service treasury;
+- USDT mint;
+- USDC mint;
+- final production `.so` SHA-256;
 - independent audit-report SHA-256;
-- verified-build evidence URLs for all four programs;
-- audit status and approved mainnet smoke plan.
+- verified-build evidence URL;
+- `audit_status: "passed"`;
+- `smoke_test_plan_approved: true`.
 
 Then run:
 
@@ -83,73 +108,96 @@ Then run:
 python3 scripts/pre-mainnet-gate.py
 ```
 
-The result must be exactly `READY FOR CONTROLLED MAINNET DEPLOYMENT`. `BLOCKED` is a hard stop. Do not bypass or weaken the gate for deployment convenience.
+A non-zero result is a hard stop. Do not weaken the gate for deployment convenience.
 
-This authorizes only controlled deployment. It does not authorize removal of any upgrade authority.
+## 7. Fund the temporary deployer
 
-## 7. Fund the temporary deployer only after final sizing
+Only after the final artifact exists:
 
-Measure the exact final artifacts and query current mainnet deployment requirements. Fund only the temporary deployment/authority wallet with the required SOL plus an explicit fee margin. Do not use the service treasury or RevenueAuthority as deployment funding wallets.
+1. measure exact `.so` size;
+2. query current Solana mainnet program deployment/rent/fee requirements;
+3. fund the temporary deployer with required SOL plus a small explicit margin;
+4. keep deployment SOL separate from protocol USDT/USDC economics.
 
 ## 8. Controlled mainnet deployment
 
-Deploy the exact audited artifacts with temporary upgrade authority retained:
+Deploy the exact audited `.so` using:
 
-1. Revenue Evidence;
-2. Revenue Qualification;
-3. Service Referral Protocol;
-4. Revenue Adapter.
+- the offline final Program ID keypair;
+- a separate temporary deployer/upgrade-authority keypair.
 
-Record `solana program show` metadata, ProgramData addresses, deployment slots, transaction signatures and authorities for all four.
+Keep upgrade authority temporarily.
 
-## 9. Verify all deployed bytecode before initialization
+Record:
 
-Dump each deployed program from mainnet and compare it against the corresponding audited artifact hash. Confirm final Program IDs, source commit, IDLs and build parameters all refer to the same release. Confirm that the final Adapter Program ID derives the exact RevenueAuthority PDA frozen in the Referral core.
+- Program ID;
+- ProgramData address;
+- deployment slot;
+- deployment transaction signature;
+- current upgrade authority;
+- source commit and local artifact hash.
+
+## 9. Verify deployed bytecode before initialization
+
+Dump/read the deployed program and verify its bytecode against the exact audited artifact/hash.
+
+Also verify:
+
+- Program ID equals the frozen public ID;
+- mainnet `Anchor.toml` mapping matches;
+- IDL corresponds to the same source commit;
+- service treasury and canonical stablecoin constants match the release manifest.
 
 Do not initialize if any comparison fails.
 
-## 10. Initialize the frozen chain
+## 10. Initialize the frozen program
 
-Initialize only with the reviewed production configuration. Verify:
+Initialize only with:
 
-- Evidence Program ID is the exact one frozen in Revenue Qualification;
-- Adapter Program ID is the exact one frozen in Revenue Qualification;
-- Qualification Program ID is the exact one frozen in the Adapter;
-- Adapter Program ID and RevenueAuthority PDA are the exact values frozen in the Referral core;
-- registration UTC, treasury and USDT/USDC mints match the release manifest;
-- canonical token accounts and all authority PDAs are derived as expected.
+- frozen service treasury `AepYo8xanmKuRiLVeYQuCTJoQr1nyKiTApoKwHMEg8fn`;
+- canonical mainnet USDT `Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB`;
+- canonical mainnet USDC `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`;
+- frozen future registration-opening timestamp.
 
-## 11. Limited mainnet smoke test
+Verify protocol and technical-root PDAs immediately after initialization.
 
-Exercise only the minimum transactions needed to confirm the complete deployed release behaves as audited:
+## 11. Limited mainnet smoke
 
-- one independently qualified and separately funded event under the FINAL Evidence semantics;
-- canonical Evidence creation and Evidence-authority CPI into Revenue Qualification;
-- Qualification verifier-PDA CPI into the Adapter;
-- creation of the unique immutable Adapter receipt;
-- Adapter RevenueAuthority transfer into the Referral vault;
-- expected 50/43/2/5 accounting;
-- appropriate ACTIVE claim behavior;
-- explicit replay rejection for the same event ID;
-- no unexpected residual token imbalance.
+Use deliberately small amounts and controlled wallets. Verify at least:
 
-Stop immediately if bytecode, Program ID, PDA, evidence, receipt, state, token balances or accounting differ from the audited baseline.
+- one registration under the intended referral relationship;
+- one unit purchase using a canonical supported stablecoin account;
+- exact unit count / Unit ID assignment;
+- buyer-paid purchase transaction;
+- expected vault and treasury movement;
+- expected direct/network/Pioneer accruals;
+- separate ACTIVE pull claim signed by the beneficiary;
+- claimant-paid transaction fee;
+- final token conservation;
+- no unexpected state/account changes.
+
+Run at least one intentionally invalid ancestry/account test if it can be done without risking production state; otherwise rely on the exact audited LiteSVM adversarial evidence.
+
+Stop immediately on any bytecode, Program ID, PDA, genealogy, state, balance or accounting mismatch.
 
 ## 12. Permanent immutability
 
-Only after all previous gates are signed off, remove upgrade authority from **each** production program:
+Only after deployment verification and smoke are signed off, remove upgrade authority permanently using the exact pinned Solana CLI syntax reviewed at release time, equivalent to:
 
 ```text
-solana program set-upgrade-authority <FINAL_EVIDENCE_PROGRAM_ID> --final
-solana program set-upgrade-authority <FINAL_QUALIFICATION_PROGRAM_ID> --final
-solana program set-upgrade-authority <FINAL_ADAPTER_PROGRAM_ID> --final
-solana program set-upgrade-authority <FINAL_REFERRAL_PROGRAM_ID> --final
+solana program set-upgrade-authority <FINAL_PROGRAM_ID> --final
 ```
 
-Then run `solana program show` for all four and archive evidence proving no upgrade authority remains.
+Then verify:
 
-After finalization, these programs cannot be upgraded or closed. There is no rollback procedure.
+```text
+solana program show <FINAL_PROGRAM_ID>
+```
+
+Archive public evidence that no upgrade authority remains.
+
+After this step the program cannot be upgraded or closed. There is no rollback procedure.
 
 ## Secrets policy
 
-Never commit or upload final Program ID keypair JSON files, deployment-wallet seeds/private keys, temporary upgrade-authority secrets, recovery phrases or encrypted secret backups. Public repository/audit/release evidence should contain only public keys, source, IDLs, hashes, transaction signatures and non-secret verification data.
+Never commit or upload Program ID keypair JSON, deployer private keys, seed phrases, recovery phrases or secret backups. Public release evidence contains only public keys, hashes, source, IDL, transaction signatures and non-secret verification data.
