@@ -1,168 +1,148 @@
-# External audit scope — Solana V0.12
+# External Audit Scope — Purchase-Triggered Solana Protocol
 
-Status: pre-audit. This document defines the intended independent review target; it is not an audit report or production approval.
+Status: **pre-audit**. This document defines the intended independent review target. It is not an audit report or a production approval.
 
 ## Production architecture in scope
 
-The final reviewed system is a four-program chain:
+The intended mainnet release is a **single immutable Solana program** plus the canonical SPL Token Program:
 
-`Revenue Evidence -> Revenue Qualification -> Revenue Adapter -> Service Referral Protocol -> SPL Token Program`
+`User purchase -> Service Referral Protocol -> canonical USDT/USDC vault -> accounting -> pull claim`
 
-Revenue Evidence implements the FINAL real-world/on-chain qualification semantics and emits canonical evidence. Revenue Qualification accepts evidence only from the frozen evidence program, binds it to the frozen adapter and canonical RevenueAuthority funding, and CPI-signs as the adapter's verifier PDA. Revenue Adapter enforces verifier-PDA authorization, canonical prefunded RevenueAuthority token accounts, immutable receipts and atomic forwarding. Service Referral Protocol performs the 50/43/2/5 accounting and user lifecycle logic.
+There is no production Revenue Evidence, Revenue Qualification or Revenue Adapter program. A successful unit purchase is the only economic event that creates referral liabilities.
 
-### Service Referral Protocol
+### Files in the production review boundary
 
 - `programs/service_referral_protocol/src/lib.rs`
 - `programs/service_referral_protocol/src/state.rs`
 - `programs/service_referral_protocol/src/math.rs`
 - `programs/service_referral_protocol/src/constants.rs`
 - `programs/service_referral_protocol/Cargo.toml`
-- root `Cargo.lock`
-
-### Revenue Adapter
-
-- `programs/revenue_adapter/src/lib.rs`
-- `programs/revenue_adapter/tests/release_binding.rs`
-- `programs/revenue_adapter/Cargo.toml`
-- the exact dependency lockfile used for the final audited build
-
-### Revenue Qualification
-
-- `programs/revenue_qualification/src/lib.rs`
-- `programs/revenue_qualification/Cargo.toml`
-- its exact dependency lockfile
-- `QUALIFIED_REVENUE_QUALIFICATION_SPEC.md` in FINAL status
-
-### Revenue Evidence
-
-- `programs/revenue_evidence/**` once the production implementation exists
-- its exact dependency lockfile
-- every upstream oracle, attestation, payment-settlement or signer dependency capable of causing a qualified evidence event
-- `QUALIFIED_REVENUE_QUALIFICATION_SPEC.md` in FINAL status
-
-### Cross-program/release controls
-
-- `adapter-integration-tests/**`
-- `integration-tests/tests/qualified_revenue_hardened_e2e.rs`
-- `integration-tests/fixtures/evidence_stub/**` as test-fixture evidence only, never production code
-- `test-programs/test_revenue_verifier/**` as legacy/test authorization evidence only, never production code
+- root `Cargo.toml` and `Cargo.lock`
+- `tests/reference-model.mjs`
+- `integration-tests/**`
 - `scripts/static-gates.py`
-- `scripts/revenue-adapter-static-gates.py`
 - `scripts/pre-mainnet-gate.py`
 - `release/mainnet-release.example.json`
+- `.github/workflows/ci.yml`
+- `.github/workflows/security-scan.yml`
+- `.github/workflows/verifiable.yml`
+- `.github/workflows/devnet-deploy-smoke.yml`
 - `PROGRAM_ID_CUSTODY_RUNBOOK.md`
 - `MAINNET_FINALIZATION_RUNBOOK.md`
+- the exact frontend/client transaction builder used to call the production instructions
 
-## Referral-core properties to review
+## Frozen economics to verify
 
-- No mutable owner/admin control surface.
-- Immutable referral relationships and exact ancestry validation.
-- Separation between service-unit/activity purchases and qualified-revenue accounting.
-- Stablecoin mint, legacy SPL Token program and canonical ATA validation.
-- Vault collateral conservation and atomic rollback on failed instructions.
-- ACTIVE / GRACE / INACTIVE time-boundary behavior and expired-balance settlement.
-- Pioneer high-precision index, fractional carry and first-100 assignment semantics.
-- Ten-level accounting, rounding and technical-root/unallocated routing.
-- Pull-based claim authorization and ACTIVE requirement.
-- Global monotonic Unit ID ranges and overflow behavior.
-- Production initialization fail-closed behavior.
+For every stablecoin unit purchase:
 
-## Revenue-Adapter properties to review
+- 1 USDT/USDC = 1 logical unit.
+- Level 1 is the buyer's immutable direct sponsor and receives 50% direct only.
+- Levels 2–10 receive the 43% network pool using the frozen schedule:
+  - L2 15%
+  - L3 9%
+  - L4 6%
+  - L5 4%
+  - L6 2.5%
+  - L7 2%
+  - L8 1.5%
+  - L9 1%
+  - L10 2%
+- Pioneer pool: 2%, shared by the first 100 real registrations according to the high-precision index implementation.
+- Service/platform allocation: 5%.
+- Aggregate allocation is exactly 50% + 43% + 2% + 5% = 100% before deterministic integer-rounding handling.
+- There is no L11 economic level and Level 1 must never receive a duplicate network-depth percentage.
 
-- No mutable admin/verifier/referral/treasury control surface after initialization.
-- Adapter config binds one Revenue Qualification Program ID and the exact referral Program ID.
-- Verifier authorization requires the deterministic qualification-program PDA signer; an ordinary wallet signer cannot substitute for it.
-- `RevenueAuthority` is a deterministic adapter PDA with no private key.
-- Qualified funds must already exist in RevenueAuthority's canonical ATA before referral liabilities are created.
-- Each event creates a deterministic receipt PDA keyed by the unique 32-byte event ID.
-- Receipt binds event ID, evidence hash, beneficiary, mint, gross amount, accepted timestamp and slot.
-- Replay of a successful event cannot create a second liability.
-- Failed downstream CPI consumes no receipt and creates no persistent token/accounting mutation.
-- Adapter cannot redirect to an arbitrary referral program.
+## User lifecycle and claim properties to review
 
-## Revenue-Qualification properties to review
+- Registration relation is immutable after creation.
+- Activity threshold is 10 units within the qualification window.
+- ACTIVE lasts 7 days and GRACE lasts 48 hours.
+- Network reward behavior at ACTIVE / GRACE / INACTIVE boundaries is deterministic and cannot be bypassed by timestamp/account substitution.
+- Pull claims require the beneficiary wallet signature and ACTIVE status.
+- Reward accrual itself requires no beneficiary signature and therefore no beneficiary-paid gas.
+- A claimant can aggregate multiple accruals and withdraw them in one later claim.
+- Permissionless expiry settlement cannot redirect funds away from the frozen service treasury.
+- Time passing by itself does not execute a transaction; settlement happens when state is touched by an instruction.
 
-- Immutable config binds exactly one executable Revenue Evidence program, its deterministic evidence-authority PDA, one Revenue Adapter program/config and the frozen USDT/USDC rails.
-- Only the evidence-authority PDA of the frozen evidence program can authorize qualification.
-- Evidence account identity is deterministic from the event ID and must be owned by the frozen evidence program.
-- Evidence binds event ID, qualification Program ID, adapter Program ID, RevenueAuthority, beneficiary, mint, amount, settlement timestamp and non-zero reference hash.
-- Requested amount cannot diverge from evidence amount.
-- Beneficiary cannot be substituted after evidence issuance.
-- Only the canonical RevenueAuthority ATA is accepted and it must be sufficiently prefunded before CPI.
-- Revenue Qualification signs the exact adapter verifier PDA and cannot redirect to another adapter.
-- Production constants fail closed until final Program IDs are frozen.
-- Failed qualification/adapter/referral CPI leaves no partial accounting mutation.
+## Purchase-path properties to review
 
-## Revenue-Evidence properties to review once implemented
+- `purchase_and_distribute` is the sole production economic entrypoint.
+- Payment amount is exactly `units * 10^6` atomic units for six-decimal USDT/USDC.
+- Unsupported mints are rejected.
+- User source token account authority is the buyer.
+- Vault and treasury token accounts are canonical ATAs for the expected owner and mint.
+- Buyer funds are transferred into the canonical vault before liabilities are released from it.
+- Unit allocation, activity update, referral accounting, Pioneer accounting and treasury routing are atomic in one Solana transaction.
+- Supplied sponsor and L2–L10 accounts must exactly match immutable ancestry.
+- Technical-root termination routes the remaining unallocated depth deterministically to treasury.
+- Failed ancestry, token-account, arithmetic or CPI validation must roll back token movement and state changes.
+- Global Unit IDs are monotonic, unique and overflow-safe.
+- Large purchases cannot overflow SPL Token `u64` payment amounts.
 
-The production evidence source must be audited against the exact FINAL `QUALIFIED_REVENUE_QUALIFICATION_SPEC.md`. Review at minimum:
+## Vault and accounting properties to review
 
-- exact event that qualifies as service revenue;
-- explicit exclusion of service-unit/activity purchases;
-- funding provenance and economic finality;
-- deterministic beneficiary binding;
-- deterministic amount derivation;
-- canonical unique-event-ID derivation;
-- canonical evidence/reference-hash derivation;
-- refund, cancellation, chargeback and reversal treatment;
-- immutable or explicitly governed trust source/oracle/attestation model;
-- absence of a generic permanent admin ability to fabricate arbitrary funded events;
-- supported stablecoin/mint constraints;
-- replay and failure semantics.
+- The vault remains fully collateralized for all outstanding claim liabilities.
+- Treasury movements are exactly service allocation plus explicitly unallocated/expired/rounding/Pioneer-unassigned value.
+- USDT and USDC accounting rails cannot contaminate each other.
+- Integer rounding cannot create value, underflow, or orphan liabilities.
+- Pioneer fractional carry is conserved at the configured high precision.
+- No claimant can clear another user's accounting buckets or redirect another user's claim.
+- A failed claim is atomic and preserves the user's accrued state.
 
-Any external oracle, signer set, upstream program, payment processor or attestation system whose compromise could issue false evidence is part of the security boundary and its key-rotation, finality and failure model must be explicitly dispositioned by the auditor.
+## Authority and immutability properties to review
 
-## Cross-program properties to review
+- No owner/admin instruction can mutate percentages, treasury, referral relationships, supported mints or accounting rules after initialization.
+- Mainnet service treasury is frozen to `AepYo8xanmKuRiLVeYQuCTJoQr1nyKiTApoKwHMEg8fn`.
+- Mainnet USDT mint is frozen to `Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB`.
+- Mainnet USDC mint is frozen to `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`.
+- Production initialization must fail closed until the final Program ID and registration-open timestamp are frozen.
+- The final Program ID keypair and deploy authority secret must never be committed to the repository.
+- Upgrade authority must remain during controlled deployment/verification/smoke and be permanently removed only after the deployed bytecode matches the reviewed artifact.
 
-- Evidence-authority PDA -> Revenue Qualification signer propagation is valid only during the intended CPI frame.
-- Revenue Qualification verifier PDA -> Revenue Adapter signer propagation is valid only during the intended CPI frame.
-- Adapter RevenueAuthority PDA -> Referral signer propagation cannot be forged externally.
-- Final Evidence, Qualification, Adapter and Referral Program IDs are distinct and frozen consistently.
-- Qualification `MAINNET_EVIDENCE_PROGRAM` equals the exact final Revenue Evidence Program ID.
-- Qualification `MAINNET_ADAPTER_PROGRAM` equals the exact final Revenue Adapter Program ID.
-- Adapter `MAINNET_VERIFIER_PROGRAM` equals the exact final Revenue Qualification Program ID.
-- Core `MAINNET_REVENUE_ADAPTER_PROGRAM` equals the exact final Revenue Adapter Program ID.
-- Core `MAINNET_QUALIFIED_REVENUE_SOURCE` equals the exact `[b"revenue-authority"]` PDA derived from that final adapter Program ID.
-- One transaction cannot partially persist evidence, receipt creation, token movement or referral accounting if any downstream step fails.
-- The release manifest, FINAL qualification-spec hash, source commit and all four artifact hashes are mutually consistent.
+## Gas model to verify
 
-## Automated evidence already available before the final audit freeze
+- Registration: registering user is the payer/signature authority for user-state creation.
+- Purchase: buyer signs and pays one Solana transaction fee for purchase plus accounting.
+- Accrual: sponsor/uplines/Pioneers do not sign merely to receive accounting credit.
+- Claim: claimant signs and pays the Solana transaction fee.
+- The protocol does not require a platform-funded transaction per commission event.
 
-- Pinned toolchain: Solana 3.1.10 and Anchor 1.1.2.
-- Referral core reference/static/Rust/property/LiteSVM tests pass on the hardened integration branch.
-- Revenue Adapter Rust unit tests and SBF candidate build pass on the hardened integration branch.
-- Revenue Qualification Rust unit tests and SBF candidate build pass on the hardened integration branch.
-- Test-only evidence fixture SBF build passes and its production feature is intentionally compile-blocked.
-- Four-program LiteSVM end-to-end testing passes for:
-  - canonical Evidence -> Qualification -> Adapter -> Referral CPI;
-  - exact 50/43/2/5 allocation conservation;
-  - canonical RevenueAuthority prefunding;
-  - beneficiary/evidence/reference-hash binding;
-  - duplicate event ID rejection;
-  - evidence/request amount mismatch rejection;
-  - rollback of nested evidence/receipt/accounting mutations on failure.
-- Earlier adapter adversarial tests also cover unsigned verifier PDA rejection and ordinary-wallet signer substitution rejection.
-- Referral-core production-equivalent devnet transaction smoke passed on 2026-08-14 with an ephemeral Program ID and mock six-decimal SPL stablecoins: initialize, Pioneer #1 registration, 10-unit activity purchase, separately funded qualified-revenue event, 50/43/2/5 allocation and ACTIVE claim.
-- That referral smoke conserved all 20 minted test tokens: `5,002,000` atomic units at the user, `14,998,000` at the test treasury and `0` in the vault after claim.
+## Automated evidence required before final audit sign-off
 
-These are engineering evidences, not substitutes for the independent audit. Final audit evidence must refer to the exact immutable-value freeze commit and the exact four final artifacts; historical development hashes must not be treated as final-release hashes.
+At minimum the exact release commit must have green evidence for:
 
-## Explicit blockers before the auditor can sign off a final mainnet release
+- pinned Solana/Anchor production compile;
+- reference-model conservation tests;
+- static security/economic gates;
+- Rust unit/property tests;
+- LiteSVM purchase/distribution/claim integration tests;
+- adversarial ancestry/account-substitution rollback tests;
+- ACTIVE/GRACE/INACTIVE boundary and expiry tests;
+- unsupported mint / wrong authority / noncanonical ATA rejection;
+- unit-ID continuity and overflow tests;
+- RustSec dependency scan;
+- reproducible/verifiable production build and SHA-256;
+- devnet smoke using the final instruction surface.
 
-- Concrete FINAL qualified-revenue product/economic specification.
-- Production Revenue Evidence implementation matching that specification.
-- Final Evidence, Qualification, Adapter and Referral Program IDs generated under the custody runbook.
-- Exact frozen evidence -> qualification -> adapter -> referral bindings, including RevenueAuthority PDA.
-- Final registration opening UTC.
-- Final dependency lockfiles and verifiable builds for all four production programs.
-- Independent disposition of all audit findings against the exact final commit/artifacts.
-- Completed `release/mainnet-release.json` and green executable pre-mainnet gate.
-- Controlled mainnet deployment, bytecode verification and full-chain limited smoke before permanent immutability.
+Historical qualified-revenue/adapter test evidence is not part of the final release evidence and must not be cited as proof of the production architecture.
 
-## Out of scope unless explicitly added by the auditor
+## Explicit blockers before final mainnet approval
 
-- Frontend UI/UX and wallet presentation.
-- Business/legal/regulatory classification of the surrounding commercial model.
-- Operational security of third-party systems that cannot affect production evidence issuance.
+- Final core instruction/state cleanup complete with no obsolete qualified-revenue authority or production entrypoint.
+- Final Program ID generated under the custody runbook and frozen consistently in source/configuration.
+- Final registration opening UTC frozen.
+- Exact dependency lockfile frozen.
+- Independent audit completed against the exact final commit and artifact, with every finding dispositioned.
+- `release/mainnet-release.json` completed with exact commit, Program ID, artifact hash, audit hash and verified-build evidence.
+- Executable pre-mainnet gate fully green.
+- Controlled mainnet deploy and limited smoke completed while upgrade authority is still retained.
+- Deployed bytecode verified against the audited artifact.
+- Upgrade authority permanently removed only after all preceding checks pass.
 
-Any system that supplies or can cause qualification evidence is not automatically out of scope: if compromise of that system can cause false qualified-revenue events, its trust assumptions must be documented and reviewed as part of the Revenue Evidence boundary.
+## Out of scope unless separately commissioned
+
+- Legal/regulatory classification of the commercial/referral model.
+- Frontend visual design.
+- Marketing or business claims.
+
+The client transaction builder remains security-relevant because it chooses the sponsor/upline accounts supplied to the program; it must therefore be reviewed for correct deterministic ancestry construction even though the on-chain program independently verifies those accounts.
