@@ -17,7 +17,6 @@ fn purchase_is_the_single_revenue_event_and_recipients_pull_claims() {
     let treasury = ctx.svm.create_funded_account(10_000_000_000).expect("treasury");
     let sponsor = ctx.svm.create_funded_account(10_000_000_000).expect("sponsor");
     let buyer = ctx.svm.create_funded_account(10_000_000_000).expect("buyer");
-    let legacy_revenue_source = ctx.svm.create_funded_account(10_000_000_000).expect("legacy revenue source");
 
     let usdt_mint = ctx.svm.create_token_mint(&initializer, 6).expect("USDT mint");
     let usdc_mint = ctx.svm.create_token_mint(&initializer, 6).expect("USDC mint");
@@ -49,10 +48,7 @@ fn purchase_is_the_single_revenue_event_and_recipients_pull_claims() {
             technical_root,
             system_program: anchor_lang::system_program::ID,
         })
-        .args(service_referral_protocol::instruction::Initialize {
-            registration_open_at,
-            qualified_revenue_source: legacy_revenue_source.pubkey(),
-        })
+        .args(service_referral_protocol::instruction::Initialize { registration_open_at })
         .instruction()
         .expect("initialize ix");
     ctx.execute_instruction(initialize_ix, &[&initializer])
@@ -106,8 +102,6 @@ fn purchase_is_the_single_revenue_event_and_recipients_pull_claims() {
     );
     ctx.svm.send_transaction(create_vaults_tx).expect("create vault ATAs");
 
-    // Sponsor registers under the technical root and activates with the same final
-    // economic path. At this point the sponsor is the only Pioneer.
     let register_sponsor_ix = ctx
         .program()
         .accounts(service_referral_protocol::accounts::Register {
@@ -162,13 +156,10 @@ fn purchase_is_the_single_revenue_event_and_recipients_pull_claims() {
         .expect("sponsor purchase tx")
         .assert_success();
 
-    // 10 USDC purchase with one Pioneer: 0.002 USDC remains as Pioneer liability.
     ctx.svm.assert_token_balance(&sponsor_usdc, 0);
     ctx.svm.assert_token_balance(&treasury_usdc, 9_998_000);
     ctx.svm.assert_token_balance(&vault_usdc, 2_000);
 
-    // Buyer then registers under sponsor. Its Pioneer checkpoint starts after the
-    // sponsor's first purchase, so it cannot claim historical Pioneer value.
     let register_buyer_ix = ctx
         .program()
         .accounts(service_referral_protocol::accounts::Register {
@@ -190,8 +181,6 @@ fn purchase_is_the_single_revenue_event_and_recipients_pull_claims() {
         .mint_to(&usdc_mint.pubkey(), &buyer_usdc, &initializer, 100 * UNIT)
         .expect("mint buyer purchase USDC");
 
-    // This single buyer-signed transaction both buys 100 units and creates all
-    // 50/43/2/5 accounting. No sponsor/upline signature is present.
     let buyer_purchase_ix = ctx
         .program()
         .accounts(service_referral_protocol::accounts::PurchaseAndDistribute {
@@ -264,8 +253,6 @@ fn purchase_is_the_single_revenue_event_and_recipients_pull_claims() {
     assert_eq!(protocol.lifetime_unallocated_usdc, 9_300_000 + network_unallocated as u128);
     assert_eq!(protocol.lifetime_pioneer_unassigned_usdc, 198_000 + pioneer_unassigned as u128);
 
-    // Sponsor claims in a separate transaction signed only by the sponsor. It gets
-    // 50 USDC direct + 0.002 historical Pioneer + 0.020 Pioneer from buyer purchase.
     let sponsor_claim = direct + 22_000;
     let sponsor_claim_ix = ctx
         .program()
@@ -288,8 +275,6 @@ fn purchase_is_the_single_revenue_event_and_recipients_pull_claims() {
     ctx.svm.assert_token_balance(&sponsor_usdc, sponsor_claim);
     ctx.svm.assert_token_balance(&vault_usdc, pioneer_per_slot);
 
-    // Buyer can independently claim its 0.020 Pioneer share. Again, only the
-    // claimant signs and therefore pays the Solana transaction fee.
     let buyer_claim_ix = ctx
         .program()
         .accounts(service_referral_protocol::accounts::Claim {
