@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
 
-const LEVEL_BPS = [1500, 900, 600, 400, 250, 200, 150, 100, 100, 100];
+// Production genealogy: L1 is the direct sponsor (50% only).
+// The 43% network pool therefore spans L2-L10.
+const LEVEL_BPS = [1500, 900, 600, 400, 250, 200, 150, 100, 200];
 const ACTIVE = 7 * 24 * 60 * 60;
 const GRACE = 48 * 60 * 60;
 const PIONEER_SLOTS = 100n;
 const PIONEER_SCALE = 1_000_000_000_000_000_000n;
 
+assert.equal(LEVEL_BPS.length, 9);
 assert.equal(LEVEL_BPS.reduce((a, b) => a + b, 0), 4300);
 assert.equal(5000 + 4300 + 200 + 500, 10000);
 
@@ -122,7 +125,7 @@ class PioneerIndex {
 const one = split(1_000_000);
 assert.deepEqual(one, {
   direct: 500_000,
-  levels: [150_000, 90_000, 60_000, 40_000, 25_000, 20_000, 15_000, 10_000, 10_000, 10_000],
+  levels: [150_000, 90_000, 60_000, 40_000, 25_000, 20_000, 15_000, 10_000, 20_000],
   pioneer: 20_000,
   service: 50_000,
   remainder: 0,
@@ -140,7 +143,7 @@ assert(payment <= 18_446_744_073_709_551_615n);
   assert.equal(u.qualificationProgress, 5);
   purchaseUnits(u, 5, 1_000 + ACTIVE + 1);
   assert.equal(status(u, 1_000 + ACTIVE + 1), 'INACTIVE');
-  assert.equal(u.qualificationProgress, 5); // old 5 expired; only the new 5 remain.
+  assert.equal(u.qualificationProgress, 5);
   purchaseUnits(u, 5, 1_000 + ACTIVE + 2);
   assert.equal(status(u, 1_000 + ACTIVE + 2), 'ACTIVE');
 }
@@ -203,7 +206,6 @@ assert(payment <= 18_446_744_073_709_551_615n);
   assert.equal(p.unassignedTreasuryScaled, 0n);
 }
 
-// Randomized split conservation.
 for (let i = 1; i <= 10_000; i++) {
   const amount = Math.floor(Math.random() * 10_000_000_000) + 1;
   const s = split(amount);
@@ -213,4 +215,4 @@ for (let i = 1; i <= 10_000; i++) {
   );
 }
 
-console.log('reference model: V0.9 invariants passed');
+console.log('reference model: V0.11 purchase-triggered invariants passed');
