@@ -7,7 +7,6 @@ pub struct ProtocolState {
     pub initialized_at: i64,
     pub registration_open_at: i64,
     pub service_treasury: Pubkey,
-    pub qualified_revenue_source: Pubkey,
     pub usdt_mint: Pubkey,
     pub usdc_mint: Pubkey,
     pub pioneer_count: u16,
@@ -34,7 +33,8 @@ pub struct ProtocolState {
 }
 
 impl ProtocolState {
-    pub const SPACE: usize = 404;
+    // 8-byte Anchor discriminator + 364 bytes of serialized fields.
+    pub const SPACE: usize = 372;
 }
 
 #[account]
