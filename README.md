@@ -1,4 +1,4 @@
-# Service Referral Protocol — Solana V0.11
+# Service Referral Protocol — Solana V0.12
 
 Public development repository for an ownerless Solana/Anchor protocol foundation.
 
@@ -26,24 +26,30 @@ The protocol does not send one transaction to every reward recipient.
 - Claim: the beneficiary signs a separate claim transaction and pays its own SOL fee. Multiple accruals can therefore be accumulated and withdrawn with one claim.
 - Expired pending amounts can be settled permissionlessly; no permanent platform keeper is required.
 
-## Frozen aggregate percentages under test
+## Frozen percentages
 
 For each purchase amount:
 
-- 50% direct reward to the buyer's registered sponsor (Level 1)
-- 43% referral-depth pool
-- 2% Pioneer allocation
-- 5% service allocation
+- **Level 1 / direct sponsor: 50%**
+- **Levels 2–10 network pool: 43%**
+- **Pioneer pool: 2%**
+- **Service/platform: 5%**
 
-These four buckets conserve exactly 100% before integer rounding handling.
+The final Levels 2–10 schedule is:
 
-### Referral-depth numbering freeze still required
+- L2: 15%
+- L3: 9%
+- L4: 6%
+- L5: 4%
+- L6: 2.5%
+- L7: 2%
+- L8: 1.5%
+- L9: 1%
+- L10: 2%
 
-The historical codebase contains ten referral-depth weights totaling 43%:
+The nine network weights sum to exactly 43%. This is the minimal-delta remapping of the historical ten-weight table: the two deepest historical 1% buckets are consolidated into L10. There is no L11 economic level and L1 is never paid twice.
 
-`15 / 9 / 6 / 4 / 2.5 / 2 / 1.5 / 1 / 1 / 1`
-
-The business rule is now explicit that the sponsor is genealogical Level 1 and receives only the 50% direct reward. A ten-level genealogy therefore has only Levels 2–10 available for the 43% pool. The exact nine-weight remapping of the 43% must be frozen before mainnet; the implementation must not silently create an eleventh genealogical level or double-pay the sponsor.
+The complete allocation is therefore exactly **50 + 43 + 2 + 5 = 100%**, before deterministic integer-rounding handling.
 
 ## Production path
 
@@ -51,7 +57,7 @@ The final production entrypoint is `purchase_and_distribute`:
 
 `buyer -> stablecoin vault -> unit/activity update + 50/43/2/5 accounting -> later pull claims`
 
-The prior `purchase_service_units` and `record_qualified_revenue` paths are retained temporarily for development/regression comparison but are explicitly disabled when the core program is compiled with the `production` feature. The old Evidence/Qualification/Adapter chain is therefore not part of the intended final production economics and must not be treated as a mainnet dependency.
+The prior `purchase_service_units` and `record_qualified_revenue` paths are retained temporarily for development/regression comparison but are explicitly disabled when the core program is compiled with the `production` feature. The old Evidence/Qualification/Adapter chain is not part of the intended final production economics and must not be treated as a mainnet dependency.
 
 ## Mainnet identities under review
 
@@ -65,10 +71,10 @@ The currently declared Program ID is a development identity and must not be trea
 
 Do **not** deploy immutable mainnet until all of these pass:
 
-1. Final Levels 2–10 distribution weights are frozen and sum to exactly 43%.
-2. Anchor production build on the pinned toolchain.
-3. Rust/reference/integration/adversarial tests for purchase-triggered economics and pull claims.
-4. Devnet tests with canonical-compatible SPL token accounts.
+1. Anchor production build on the pinned toolchain.
+2. Rust/reference/integration/adversarial tests for purchase-triggered economics and pull claims.
+3. Devnet tests with canonical-compatible SPL token accounts.
+4. Obsolete qualified-revenue programs and release dependencies removed from the final production surface.
 5. Independent audit of the final production core and client transaction construction.
 6. Public reproducible/verified build.
 7. Registration opening UTC frozen.
