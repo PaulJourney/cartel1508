@@ -151,7 +151,6 @@ fn purchase_is_the_single_revenue_event_and_recipients_pull_claims() {
             upline_7: technical_root,
             upline_8: technical_root,
             upline_9: technical_root,
-            upline_10: technical_root,
             batch: sponsor_batch,
             token_program: spl_token::id(),
             system_program: anchor_lang::system_program::ID,
@@ -215,7 +214,6 @@ fn purchase_is_the_single_revenue_event_and_recipients_pull_claims() {
             upline_7: technical_root,
             upline_8: technical_root,
             upline_9: technical_root,
-            upline_10: technical_root,
             batch: buyer_batch,
             token_program: spl_token::id(),
             system_program: anchor_lang::system_program::ID,
@@ -232,7 +230,7 @@ fn purchase_is_the_single_revenue_event_and_recipients_pull_claims() {
     let service_fee = 5 * UNIT;
     let pioneer_pool = 2 * UNIT;
     let pioneer_per_slot = pioneer_pool / 100;
-    let pioneer_assigned = pioneer_per_slot * 2; // sponsor + buyer
+    let pioneer_assigned = pioneer_per_slot * 2;
     let pioneer_unassigned = pioneer_pool - pioneer_assigned;
     let purchase_treasury_delta = network_unallocated + service_fee + pioneer_unassigned;
     let purchase_vault_liability = direct + pioneer_assigned;
