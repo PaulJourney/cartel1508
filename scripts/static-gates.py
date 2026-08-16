@@ -15,6 +15,7 @@ def section(start_marker: str, end_marker: str) -> str:
 final_purchase = section('    pub fn purchase_and_distribute', '    pub fn settle_expired')
 claim = section('    pub fn claim', '}\n\n#[derive(Accounts)]')
 activity_helper = section('fn update_activity_after_purchase', 'fn add_self_reward')
+qualification_window_helper = section('fn qualification_window_open', 'fn expire_unclaimed_for_mint')
 expiry_helper = section('fn expire_unclaimed_for_mint', '#[allow(clippy::too_many_arguments)]')
 production_accounts = section('pub struct PurchaseAndDistribute', 'pub struct SettleExpired')
 initialize = section('    pub fn initialize', '    pub fn register')
@@ -45,6 +46,8 @@ checks = {
     'all inactive unclaimed flow is covered': all(x in expiry_helper for x in ['ActivityStatus::Inactive', 'self_accrued_usdt', 'self_accrued_usdc', 'network_claimable_usdt', 'network_claimable_usdc', 'network_pending_usdt', 'network_pending_usdc', 'pioneer_due(', 'checkpoint_pioneer_claimed(', 'mark_user_expired(']),
     'inactive unclaimed flow transfers from vault': 'expire_unclaimed_for_mint' in source and 'transfer_from_vault' in source,
     'activity partial window exists': 'qualification_window_started_at' in state and 'qualification_window_started_at' in activity_helper,
+    'qualification window uses progress as existence sentinel': 'if user.qualification_progress_units == 0' in qualification_window_helper and 'qualification_window_started_at > 0' not in qualification_window_helper,
+    'stale qualification reset is not gated by positive timestamp': 'if user.qualification_progress_units > 0' in activity_helper and 'qualification_window_started_at > 0' not in activity_helper,
     'partial qualification preserves SELF and Pioneer only': 'qualification_window_open' in source and 'preserve_self_and_pioneer' in expiry_helper and 'network_claimable_usdt = 0' in expiry_helper and 'network_pending_usdt = 0' in expiry_helper,
     'Pioneer positions require one 1000-unit purchase': 'PIONEER_POSITION_PURCHASE_UNITS: u64 = 1_000' in constants and 'units / PIONEER_POSITION_PURCHASE_UNITS' in math,
     'Pioneer registration consumes no position': 'u.pioneer_positions = 0' in source and 'Registration alone never consumes a Pioneer position' in source,
