@@ -77,7 +77,11 @@ fn ten_single_unit_purchases_preserve_same_self_and_pioneer_as_one_ten_unit_purc
     ctx.svm.send_transaction(create_vaults).expect("create vaults");
     ctx.svm.mint_to(&usdc_mint.pubkey(), &buyer_usdc, &initializer, 10 * UNIT).expect("fund buyer");
 
-    for batch_index in 0u64..10 {
+    for _purchase_index in 0u64..10 {
+        // Each 1-unit instruction is otherwise byte-for-byte identical. Rotate only
+        // the recent blockhash so LiteSVM/Solana does not reject later transactions
+        // as duplicate signatures; chain time remains unchanged inside the window.
+        ctx.svm.expire_blockhash();
         let ix = ctx.program()
             .accounts(service_referral_protocol::accounts::PurchaseAndDistribute {
                 wallet: buyer.pubkey(), protocol, user: buyer_pda, user_source: buyer_usdc,
