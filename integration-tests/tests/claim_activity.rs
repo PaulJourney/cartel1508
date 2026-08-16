@@ -120,8 +120,7 @@ fn inactive_sponsor_rewards_are_treasury_destined_and_cannot_be_claimed() {
         .expect("fund buyer");
 
     // Sponsor never buys 10 units and is INACTIVE. Buyer buys 100 units, becomes
-    // ACTIVE, receives SELF 50%, while sponsor's U1 15% plus its current Pioneer
-    // entitlement are treasury-destined immediately under IC-A.
+    // ACTIVE, receives SELF 50%, while sponsor's U1 15% is treasury-destined immediately under IC-A. No Pioneer position exists below a single 1,000-unit purchase.
     let purchase_ix = ctx
         .program()
         .accounts(service_referral_protocol::accounts::PurchaseAndDistribute {
@@ -157,17 +156,16 @@ fn inactive_sponsor_rewards_are_treasury_destined_and_cannot_be_claimed() {
     let protocol_after_purchase = read_protocol(&ctx, protocol);
     assert_eq!(sponsor_after_purchase.active_until, 0);
     assert_eq!(sponsor_after_purchase.network_claimable_usdc, 0);
-    assert_eq!(sponsor_after_purchase.lifetime_expired_usdc, 15_020_000u128);
+    assert_eq!(sponsor_after_purchase.lifetime_expired_usdc, 15_000_000u128);
     assert_eq!(buyer_after_purchase.self_accrued_usdc, 50 * UNIT);
     assert!(buyer_after_purchase.active_until > 0);
-    assert_eq!(protocol_after_purchase.lifetime_expired_usdc, 15_020_000u128);
+    assert_eq!(protocol_after_purchase.lifetime_expired_usdc, 15_000_000u128);
 
-    // 15.020 expired sponsor/Pioneer + 28 unallocated upper network + 5 service
-    // + 1.960 unassigned Pioneer = 49.980 treasury. Buyer SELF + buyer Pioneer
-    // remain collateralized in the vault.
+    // 15 expired sponsor + 28 unallocated upper network + 5 service + the full
+    // 2% unassigned Pioneer pool = 50 treasury. Only buyer SELF remains in vault.
     ctx.svm.assert_token_balance(&buyer_usdc, 0);
-    ctx.svm.assert_token_balance(&treasury_usdc, 49_980_000);
-    ctx.svm.assert_token_balance(&vault_usdc, 50_020_000);
+    ctx.svm.assert_token_balance(&treasury_usdc, 50_000_000);
+    ctx.svm.assert_token_balance(&vault_usdc, 50_000_000);
     ctx.svm.assert_token_balance(&sponsor_usdc, 0);
 
     let claim_ix = ctx
@@ -210,8 +208,8 @@ fn inactive_sponsor_rewards_are_treasury_destined_and_cannot_be_claimed() {
         .execute_instruction(settle_ix, &[&buyer])
         .expect("settle result");
     assert!(!settle_outcome.is_success(), "expired sponsor value must not settle twice");
-    ctx.svm.assert_token_balance(&treasury_usdc, 49_980_000);
-    ctx.svm.assert_token_balance(&vault_usdc, 50_020_000);
+    ctx.svm.assert_token_balance(&treasury_usdc, 50_000_000);
+    ctx.svm.assert_token_balance(&vault_usdc, 50_000_000);
 
     let buyer_claim_ix = ctx
         .program()
@@ -231,9 +229,9 @@ fn inactive_sponsor_rewards_are_treasury_destined_and_cannot_be_claimed() {
         .expect("buyer claim tx")
         .assert_success();
 
-    ctx.svm.assert_token_balance(&buyer_usdc, 50_020_000);
-    ctx.svm.assert_token_balance(&treasury_usdc, 49_980_000);
+    ctx.svm.assert_token_balance(&buyer_usdc, 50_000_000);
+    ctx.svm.assert_token_balance(&treasury_usdc, 50_000_000);
     ctx.svm.assert_token_balance(&vault_usdc, 0);
-    assert_eq!(50_020_000u64 + 49_980_000u64, 100 * UNIT);
+    assert_eq!(50_000_000u64 + 50_000_000u64, 100 * UNIT);
 
 }

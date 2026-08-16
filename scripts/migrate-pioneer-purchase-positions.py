@@ -16,10 +16,10 @@ for p in ROOT.rglob('*'):
         continue
     text = p.read_text(errors='ignore')
     new = (text
-        .replace('pioneer_id', 'pioneer_positions')
-        .replace('pioneerId', 'pioneerPositions')
-        .replace('pioneer_count', 'pioneer_positions_assigned')
-        .replace('pioneerCount', 'pioneerPositionsAssigned'))
+        .replace('pioneer_positions', 'pioneer_positions')
+        .replace('pioneerPositions', 'pioneerPositions')
+        .replace('pioneer_positions_assigned', 'pioneer_positions_assigned')
+        .replace('pioneerPositionsAssigned', 'pioneerPositionsAssigned'))
     if new != text:
         p.write_text(new)
 

@@ -9,7 +9,8 @@ pub struct ProtocolState {
     pub service_treasury: Pubkey,
     pub usdt_mint: Pubkey,
     pub usdc_mint: Pubkey,
-    pub pioneer_count: u16,
+    /// Number of the 100 Pioneer positions permanently assigned so far.
+    pub pioneer_positions_assigned: u16,
     pub real_user_count: u64,
     /// Next globally unique logical service-unit ID. Starts at 1.
     pub next_unit_id: u128,
@@ -43,7 +44,8 @@ pub struct UserState {
     pub wallet: Pubkey,
     pub referrer: Pubkey,
     pub registered_at: i64,
-    pub pioneer_id: u16,
+    /// Number of Pioneer positions owned by this wallet. One wallet may own many.
+    pub pioneer_positions: u16,
     pub active_until: i64,
     pub grace_until: i64,
     pub qualification_progress_units: u64,

@@ -75,7 +75,7 @@ fn grace_preserves_self_and_network_temporarily_then_inactivity_expires_them() {
     );
     ctx.svm.send_transaction(create_vaults).expect("create vaults");
 
-    // Activate sponsor with 10 units while it is the only Pioneer.
+    // Activate sponsor with 10 units. This is below the 1,000-unit Pioneer threshold.
     ctx.svm.mint_to(&usdc_mint.pubkey(), &sponsor_usdc, &initializer, 10 * UNIT).expect("fund sponsor");
     let sponsor_purchase = ctx.program()
         .accounts(service_referral_protocol::accounts::PurchaseAndDistribute {
@@ -147,13 +147,13 @@ fn grace_preserves_self_and_network_temporarily_then_inactivity_expires_them() {
     assert_eq!(still_grace.network_pending_usdc, 15 * UNIT);
 
     // Miss the grace deadline. Permissionless settlement must irreversibly clear the
-    // 5 SELF + 15 pending U1 network + sponsor's 0.022 Pioneer due.
+    // 5 SELF + 15 pending U1 network. No Pioneer position was created.
     clock.unix_timestamp = sponsor_grace.grace_until + 1;
     ctx.svm.set_sysvar(&clock);
     ctx.svm.expire_blockhash();
 
-    ctx.svm.assert_token_balance(&treasury_usdc, 39_958_000);
-    ctx.svm.assert_token_balance(&vault_usdc, 70_042_000);
+    ctx.svm.assert_token_balance(&treasury_usdc, 40_000_000);
+    ctx.svm.assert_token_balance(&vault_usdc, 70_000_000);
 
     let settle = ctx.program()
         .accounts(service_referral_protocol::accounts::SettleExpired {
@@ -169,10 +169,10 @@ fn grace_preserves_self_and_network_temporarily_then_inactivity_expires_them() {
     assert_eq!(sponsor_inactive.self_accrued_usdc, 0);
     assert_eq!(sponsor_inactive.network_claimable_usdc, 0);
     assert_eq!(sponsor_inactive.network_pending_usdc, 0);
-    assert_eq!(sponsor_inactive.lifetime_expired_usdc, 20_022_000u128);
+    assert_eq!(sponsor_inactive.lifetime_expired_usdc, 20_000_000u128);
 
-    ctx.svm.assert_token_balance(&treasury_usdc, 59_980_000);
-    ctx.svm.assert_token_balance(&vault_usdc, 50_020_000);
+    ctx.svm.assert_token_balance(&treasury_usdc, 60_000_000);
+    ctx.svm.assert_token_balance(&vault_usdc, 50_000_000);
 
     // A second settlement must fail and cannot transfer the same expired value twice.
     ctx.svm.expire_blockhash();
@@ -186,6 +186,6 @@ fn grace_preserves_self_and_network_temporarily_then_inactivity_expires_them() {
         .instruction().expect("second settle");
     let second = ctx.execute_instruction(settle_again, &[&buyer]).expect("second settle result");
     assert!(!second.is_success(), "expired value must not be settleable twice");
-    ctx.svm.assert_token_balance(&treasury_usdc, 59_980_000);
-    ctx.svm.assert_token_balance(&vault_usdc, 50_020_000);
+    ctx.svm.assert_token_balance(&treasury_usdc, 60_000_000);
+    ctx.svm.assert_token_balance(&vault_usdc, 50_000_000);
 }

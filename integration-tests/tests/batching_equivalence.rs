@@ -20,7 +20,7 @@ fn read_protocol(ctx: &AnchorContext, pda: Pubkey) -> ProtocolState {
 }
 
 #[test]
-fn ten_single_unit_purchases_preserve_same_self_and_pioneer_as_one_ten_unit_purchase() {
+fn ten_single_unit_purchases_preserve_same_self_as_one_ten_unit_purchase() {
     let mut ctx = AnchorLiteSVM::build_with_program(ID, PROGRAM_BYTES);
     let initializer = ctx.svm.create_funded_account(60_000_000_000).expect("initializer");
     let treasury = ctx.svm.create_funded_account(10_000_000_000).expect("treasury");
@@ -105,12 +105,12 @@ fn ten_single_unit_purchases_preserve_same_self_and_pioneer_as_one_ten_unit_purc
     assert_eq!(user.self_accrued_usdc, 5 * UNIT, "all ten provisional SELF rewards must survive qualification");
     assert_eq!(state.next_unit_id, 11);
 
-    // Exactly the same economics as a single 10-unit root purchase:
-    // SELF 5 + Pioneer #1 0.002 remain in vault; network 4.3 + service .5 +
-    // unassigned Pioneer .198 go to treasury.
+    // Exactly the same economics as a single 10-unit root purchase: SELF 5 remains
+    // in vault; network 4.3 + service .5 + the full unassigned Pioneer .2 go treasury.
+    // Ten 1-unit purchases never combine into a 1,000-unit Pioneer position.
     ctx.svm.assert_token_balance(&buyer_usdc, 0);
-    ctx.svm.assert_token_balance(&treasury_usdc, 4_998_000);
-    ctx.svm.assert_token_balance(&vault_usdc, 5_002_000);
+    ctx.svm.assert_token_balance(&treasury_usdc, 5_000_000);
+    ctx.svm.assert_token_balance(&vault_usdc, 5_000_000);
 
     let claim = ctx.program()
         .accounts(service_referral_protocol::accounts::Claim {
@@ -121,9 +121,9 @@ fn ten_single_unit_purchases_preserve_same_self_and_pioneer_as_one_ten_unit_purc
         .instruction().expect("claim");
     ctx.execute_instruction(claim, &[&buyer]).expect("claim tx").assert_success();
 
-    ctx.svm.assert_token_balance(&buyer_usdc, 5_002_000);
-    ctx.svm.assert_token_balance(&treasury_usdc, 4_998_000);
+    ctx.svm.assert_token_balance(&buyer_usdc, 5_000_000);
+    ctx.svm.assert_token_balance(&treasury_usdc, 5_000_000);
     ctx.svm.assert_token_balance(&vault_usdc, 0);
     let claimed = read_user(&ctx, buyer_pda);
-    assert_eq!(claimed.lifetime_claimed_usdc, 5_002_000u128);
+    assert_eq!(claimed.lifetime_claimed_usdc, 5_000_000u128);
 }

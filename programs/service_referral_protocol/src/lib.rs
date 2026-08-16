@@ -49,7 +49,7 @@ pub mod service_referral_protocol {
         p.service_treasury = ctx.accounts.service_treasury.key();
         p.usdt_mint = ctx.accounts.usdt_mint.key();
         p.usdc_mint = ctx.accounts.usdc_mint.key();
-        p.pioneer_count = 0;
+        p.pioneer_positions_assigned = 0;
         p.real_user_count = 0;
         p.next_unit_id = 1;
         p.pioneer_index_usdt = 0;
@@ -72,7 +72,7 @@ pub mod service_referral_protocol {
         root.wallet = Pubkey::default();
         root.referrer = Pubkey::default();
         root.registered_at = now;
-        root.pioneer_id = 0;
+        root.pioneer_positions = 0;
         root.active_until = 0;
         root.grace_until = 0;
         root.qualification_progress_units = 0;
@@ -107,15 +107,8 @@ pub mod service_referral_protocol {
             ProtocolError::SelfReferral
         );
 
-        let pioneer_id = if p.pioneer_count < PIONEER_SLOTS {
-            p.pioneer_count = p
-                .pioneer_count
-                .checked_add(1)
-                .ok_or(ProtocolError::ArithmeticOverflow)?;
-            p.pioneer_count
-        } else {
-            0
-        };
+        // Registration alone never consumes a Pioneer position. Positions are
+        // created only after a qualifying single purchase of >=1,000 units.
         p.real_user_count = p
             .real_user_count
             .checked_add(1)
@@ -126,7 +119,7 @@ pub mod service_referral_protocol {
         u.wallet = ctx.accounts.wallet.key();
         u.referrer = ctx.accounts.referrer_wallet.key();
         u.registered_at = now;
-        u.pioneer_id = pioneer_id;
+        u.pioneer_positions = 0;
         u.active_until = 0;
         u.grace_until = 0;
         u.qualification_progress_units = 0;
@@ -143,8 +136,8 @@ pub mod service_referral_protocol {
         u.lifetime_claimed_usdc = 0;
         u.lifetime_expired_usdt = 0;
         u.lifetime_expired_usdc = 0;
-        u.pioneer_checkpoint_usdt = p.pioneer_index_usdt;
-        u.pioneer_checkpoint_usdc = p.pioneer_index_usdc;
+        u.pioneer_checkpoint_usdt = 0;
+        u.pioneer_checkpoint_usdc = 0;
         Ok(())
     }
 
@@ -404,6 +397,13 @@ pub mod service_referral_protocol {
             pioneer_unassigned,
         )?;
 
+        // Rule B: this purchase may earn new Pioneer positions, but those positions
+        // start at the already-advanced index and therefore earn only from the next
+        // global purchase onward. The global 100-position cap is absolute.
+        let pioneer_positions_added =
+            assign_pioneer_positions_after_purchase(&mut ctx.accounts.user, p, units)?;
+        let pioneer_positions_total = p.pioneer_positions_assigned;
+
         emit!(UnitsPurchased {
             buyer: ctx.accounts.wallet.key(),
             mint,
@@ -411,6 +411,8 @@ pub mod service_referral_protocol {
             units,
             first_unit_id,
             last_unit_id,
+            pioneer_positions_added,
+            pioneer_positions_total,
             purchased_at: now,
         });
         Ok(())
@@ -512,6 +514,8 @@ pub struct UnitsPurchased {
     pub units: u64,
     pub first_unit_id: u128,
     pub last_unit_id: u128,
+    pub pioneer_positions_added: u16,
+    pub pioneer_positions_total: u16,
     pub purchased_at: i64,
 }
 
@@ -1027,7 +1031,7 @@ fn accrue_pioneer(p: &mut ProtocolState, mint: Pubkey, amount: u64) -> Result<u6
         .ok_or(ProtocolError::ArithmeticOverflow)?
         .checked_div(PIONEER_SLOTS as u128)
         .ok_or(ProtocolError::ArithmeticUnderflow)?;
-    let unassigned = (PIONEER_SLOTS - p.pioneer_count) as u128;
+    let unassigned = (PIONEER_SLOTS - p.pioneer_positions_assigned) as u128;
     let unassigned_scaled = per_share_scaled
         .checked_mul(unassigned)
         .ok_or(ProtocolError::ArithmeticOverflow)?;
@@ -1062,8 +1066,48 @@ fn accrue_pioneer(p: &mut ProtocolState, mint: Pubkey, amount: u64) -> Result<u6
     u64::try_from(whole_atomic).map_err(|_| ProtocolError::ArithmeticOverflow.into())
 }
 
+fn assign_pioneer_positions_after_purchase(
+    user: &mut UserState,
+    p: &mut ProtocolState,
+    units: u64,
+) -> Result<u16> {
+    let added = pioneer_positions_for_purchase(units, p.pioneer_positions_assigned);
+    if added == 0 {
+        return Ok(0);
+    }
+    let added_u128 = added as u128;
+    // New positions enter at the current index, excluding every prior purchase and
+    // the purchase that created the positions (Rule B).
+    let usdt_debt = p
+        .pioneer_index_usdt
+        .checked_mul(added_u128)
+        .ok_or(ProtocolError::ArithmeticOverflow)?;
+    let usdc_debt = p
+        .pioneer_index_usdc
+        .checked_mul(added_u128)
+        .ok_or(ProtocolError::ArithmeticOverflow)?;
+    user.pioneer_checkpoint_usdt = user
+        .pioneer_checkpoint_usdt
+        .checked_add(usdt_debt)
+        .ok_or(ProtocolError::ArithmeticOverflow)?;
+    user.pioneer_checkpoint_usdc = user
+        .pioneer_checkpoint_usdc
+        .checked_add(usdc_debt)
+        .ok_or(ProtocolError::ArithmeticOverflow)?;
+    user.pioneer_positions = user
+        .pioneer_positions
+        .checked_add(added)
+        .ok_or(ProtocolError::ArithmeticOverflow)?;
+    p.pioneer_positions_assigned = p
+        .pioneer_positions_assigned
+        .checked_add(added)
+        .ok_or(ProtocolError::ArithmeticOverflow)?;
+    require!(p.pioneer_positions_assigned <= PIONEER_SLOTS, ProtocolError::ArithmeticOverflow);
+    Ok(added)
+}
+
 fn pioneer_due(user: &UserState, p: &ProtocolState, mint: Pubkey) -> Result<u64> {
-    if user.pioneer_id == 0 {
+    if user.pioneer_positions == 0 {
         return Ok(0);
     }
     let (index, checkpoint) = if mint == p.usdt_mint {
@@ -1073,7 +1117,10 @@ fn pioneer_due(user: &UserState, p: &ProtocolState, mint: Pubkey) -> Result<u64>
     } else {
         return err!(ProtocolError::UnsupportedToken);
     };
-    let diff_scaled = index
+    let entitlement_scaled = index
+        .checked_mul(user.pioneer_positions as u128)
+        .ok_or(ProtocolError::ArithmeticOverflow)?;
+    let diff_scaled = entitlement_scaled
         .checked_sub(checkpoint)
         .ok_or(ProtocolError::ArithmeticUnderflow)?;
     let due = diff_scaled / PIONEER_SCALE;
@@ -1086,7 +1133,7 @@ fn checkpoint_pioneer_claimed(
     mint: Pubkey,
     claimed: u64,
 ) -> Result<()> {
-    if user.pioneer_id == 0 || claimed == 0 {
+    if user.pioneer_positions == 0 || claimed == 0 {
         return Ok(());
     }
     let advance_scaled = (claimed as u128)
@@ -1097,8 +1144,12 @@ fn checkpoint_pioneer_claimed(
             .pioneer_checkpoint_usdt
             .checked_add(advance_scaled)
             .ok_or(ProtocolError::ArithmeticOverflow)?;
+        let max_checkpoint = p
+            .pioneer_index_usdt
+            .checked_mul(user.pioneer_positions as u128)
+            .ok_or(ProtocolError::ArithmeticOverflow)?;
         require!(
-            user.pioneer_checkpoint_usdt <= p.pioneer_index_usdt,
+            user.pioneer_checkpoint_usdt <= max_checkpoint,
             ProtocolError::ArithmeticUnderflow
         );
     } else if mint == p.usdc_mint {
@@ -1106,8 +1157,12 @@ fn checkpoint_pioneer_claimed(
             .pioneer_checkpoint_usdc
             .checked_add(advance_scaled)
             .ok_or(ProtocolError::ArithmeticOverflow)?;
+        let max_checkpoint = p
+            .pioneer_index_usdc
+            .checked_mul(user.pioneer_positions as u128)
+            .ok_or(ProtocolError::ArithmeticOverflow)?;
         require!(
-            user.pioneer_checkpoint_usdc <= p.pioneer_index_usdc,
+            user.pioneer_checkpoint_usdc <= max_checkpoint,
             ProtocolError::ArithmeticUnderflow
         );
     } else {

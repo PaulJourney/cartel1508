@@ -123,3 +123,13 @@ Do **not** make the program immutable on mainnet until all of these pass. CI evi
 ## Important Solana property
 
 Time does not execute transactions by itself. After the grace timestamp, unclaimed value is economically treasury-destined, but physical token movement occurs on the next instruction that settles or touches the relevant state. This does not require a platform-funded transaction per commission event.
+### Pioneer 2% pool — purchase-earned positions
+
+- The pool has an absolute maximum of **100 positions**.
+- Registration alone earns **zero** positions.
+- A single purchase earns `floor(units / 1000)` positions; purchases below 1,000 never accumulate across transactions.
+- One wallet may own multiple positions.
+- Assignment is capped by remaining capacity: at 98/100, a 3,000-unit purchase receives exactly 2 positions.
+- At 100/100 the pool is permanently saturated and no later purchase can create another position.
+- **Rule B:** positions created by a purchase begin earning only from the next global purchase.
+- Network/SELF/Pioneer earnings and claims never create Pioneer positions; only the gross units of the individual buyer-signed purchase do.

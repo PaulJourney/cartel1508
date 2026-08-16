@@ -57,6 +57,17 @@ pub fn allocate_unit_range(next_unit_id: u128, units: u64) -> Result<(u128, u128
     Ok((first, last, next))
 }
 
+/// Pioneer positions created by this purchase only. There is no cross-purchase
+/// accumulation. The global cap of 100 is absolute.
+pub fn pioneer_positions_for_purchase(units: u64, already_assigned: u16) -> u16 {
+    if already_assigned >= PIONEER_SLOTS {
+        return 0;
+    }
+    let requested = units / PIONEER_POSITION_PURCHASE_UNITS;
+    let remaining = (PIONEER_SLOTS - already_assigned) as u64;
+    requested.min(remaining) as u16
+}
+
 pub fn activity_status(user: &UserState, now: i64) -> ActivityStatus {
     if user.active_until > 0 && now <= user.active_until {
         ActivityStatus::Active
@@ -97,6 +108,25 @@ mod tests {
         assert_eq!(last_b, 100_000_000_010);
         assert_eq!(next_b, 100_000_000_011);
         assert!(last_a < first_b);
+    }
+
+    #[test]
+    fn pioneer_positions_require_single_thousand_unit_purchase_and_cap_at_100() {
+        assert_eq!(pioneer_positions_for_purchase(0, 0), 0);
+        assert_eq!(pioneer_positions_for_purchase(50, 0), 0);
+        assert_eq!(pioneer_positions_for_purchase(500, 0), 0);
+        assert_eq!(pioneer_positions_for_purchase(999, 0), 0);
+        assert_eq!(pioneer_positions_for_purchase(1_000, 0), 1);
+        assert_eq!(pioneer_positions_for_purchase(2_000, 0), 2);
+        assert_eq!(pioneer_positions_for_purchase(3_750, 0), 3);
+        // Separate 500-unit purchases each remain individually ineligible.
+        assert_eq!(pioneer_positions_for_purchase(500, 0), 0);
+        assert_eq!(pioneer_positions_for_purchase(500, 0), 0);
+        // Only two slots remain: a 3,000-unit purchase receives exactly two.
+        assert_eq!(pioneer_positions_for_purchase(3_000, 98), 2);
+        // Once 100/100 is reached the pool can never create another position.
+        assert_eq!(pioneer_positions_for_purchase(1_000, 100), 0);
+        assert_eq!(pioneer_positions_for_purchase(u64::MAX, 100), 0);
     }
 
     #[test]

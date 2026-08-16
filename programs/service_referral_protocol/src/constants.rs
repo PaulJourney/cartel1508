@@ -8,6 +8,9 @@ pub const ACTIVE_SECONDS: i64 = 7 * 24 * 60 * 60;
 pub const GRACE_SECONDS: i64 = 48 * 60 * 60;
 
 pub const PIONEER_SLOTS: u16 = 100;
+/// One Pioneer position is earned for each complete 1,000 units in one purchase.
+/// Purchases never accumulate toward this threshold across transactions.
+pub const PIONEER_POSITION_PURCHASE_UNITS: u64 = 1_000;
 pub const PIONEER_SCALE: u128 = 1_000_000_000_000_000_000;
 
 pub const BPS_DENOMINATOR: u64 = 10_000;
