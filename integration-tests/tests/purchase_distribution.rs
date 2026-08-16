@@ -137,7 +137,6 @@ fn purchase_is_the_single_revenue_event_and_recipients_pull_claims() {
             upline_7: technical_root,
             upline_8: technical_root,
             token_program: spl_token::id(),
-            system_program: anchor_lang::system_program::ID,
         })
         .args(service_referral_protocol::instruction::PurchaseAndDistribute { units: 10 })
         .instruction()
@@ -193,7 +192,6 @@ fn purchase_is_the_single_revenue_event_and_recipients_pull_claims() {
             upline_7: technical_root,
             upline_8: technical_root,
             token_program: spl_token::id(),
-            system_program: anchor_lang::system_program::ID,
         })
         .args(service_referral_protocol::instruction::PurchaseAndDistribute { units: 100 })
         .instruction()

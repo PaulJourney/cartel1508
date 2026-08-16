@@ -207,7 +207,6 @@ fn false_upline_cannot_move_tokens_create_units_or_leave_partial_rewards() {
             upline_7: technical_root,
             upline_8: technical_root,
             token_program: spl_token::id(),
-            system_program: anchor_lang::system_program::ID,
         })
         .args(service_referral_protocol::instruction::PurchaseAndDistribute { units: 100 })
         .instruction()

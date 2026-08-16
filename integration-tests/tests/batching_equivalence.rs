@@ -87,7 +87,6 @@ fn ten_single_unit_purchases_preserve_same_self_and_pioneer_as_one_ten_unit_purc
                 upline_1: technical_root, upline_2: technical_root, upline_3: technical_root,
                 upline_4: technical_root, upline_5: technical_root, upline_6: technical_root,
                 upline_7: technical_root, upline_8: technical_root,
-                batch, token_program: spl_token::id(), system_program: anchor_lang::system_program::ID,
             })
             .args(service_referral_protocol::instruction::PurchaseAndDistribute { units: 1 })
             .instruction().expect("single-unit purchase");

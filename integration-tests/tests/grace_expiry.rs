@@ -87,7 +87,6 @@ fn grace_preserves_self_and_network_temporarily_then_inactivity_expires_them() {
             upline_4: technical_root, upline_5: technical_root, upline_6: technical_root,
             upline_7: technical_root, upline_8: technical_root,
             batch: sponsor_batch, token_program: spl_token::id(),
-            system_program: anchor_lang::system_program::ID,
         })
         .args(service_referral_protocol::instruction::PurchaseAndDistribute { units: 10 })
         .instruction().expect("sponsor purchase");
@@ -123,7 +122,6 @@ fn grace_preserves_self_and_network_temporarily_then_inactivity_expires_them() {
             upline_4: technical_root, upline_5: technical_root, upline_6: technical_root,
             upline_7: technical_root, upline_8: technical_root,
             batch: buyer_batch, token_program: spl_token::id(),
-            system_program: anchor_lang::system_program::ID,
         })
         .args(service_referral_protocol::instruction::PurchaseAndDistribute { units: 100 })
         .instruction().expect("buyer purchase");

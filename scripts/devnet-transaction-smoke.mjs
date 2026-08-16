@@ -188,7 +188,6 @@ const sponsorPurchaseIx = await program.methods
     directReferrer: technicalRoot,
     ...rootEight,
     tokenProgram: TOKEN_PROGRAM_ID,
-    systemProgram: SystemProgram.programId,
   })
   .instruction();
 await send(connection, sponsor, sponsorPurchaseIx, "sponsor buys 10 units / SELF activates");
@@ -238,7 +237,6 @@ const buyerPurchaseIx = await program.methods
     upline7: technicalRoot,
     upline8: technicalRoot,
     tokenProgram: TOKEN_PROGRAM_ID,
-    systemProgram: SystemProgram.programId,
   })
   .instruction();
 await send(connection, payer, buyerPurchaseIx, "buyer buys 100 units / SELF + nine-upline accounting");

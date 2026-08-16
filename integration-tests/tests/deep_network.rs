@@ -182,7 +182,6 @@ fn full_genealogy_pays_self_and_nine_uplines_but_never_tenth_upline() {
                 upline_8: uplines[7],
                 batch,
                 token_program: spl_token::id(),
-                system_program: anchor_lang::system_program::ID,
             })
             .args(service_referral_protocol::instruction::PurchaseAndDistribute { units: 10 })
             .instruction()
@@ -234,7 +233,6 @@ fn full_genealogy_pays_self_and_nine_uplines_but_never_tenth_upline() {
             upline_7: user_pdas[3],
             upline_8: user_pdas[2],
             token_program: spl_token::id(),
-            system_program: anchor_lang::system_program::ID,
         })
         .args(service_referral_protocol::instruction::PurchaseAndDistribute { units: 100 })
         .instruction()
