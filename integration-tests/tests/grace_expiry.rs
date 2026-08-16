@@ -1,5 +1,5 @@
 use anchor_lang::{prelude::*, AccountDeserialize};
-use anchor_litesvm::{AnchorLiteSVM, AssertionHelpers, TestHelpers};
+use anchor_litesvm::{AnchorContext, AnchorLiteSVM, AssertionHelpers, TestHelpers};
 use service_referral_protocol::{state::UserState, ID};
 use solana_signer::Signer;
 use solana_transaction::Transaction;
@@ -7,7 +7,7 @@ use solana_transaction::Transaction;
 const PROGRAM_BYTES: &[u8] = include_bytes!("../../target/deploy/service_referral_protocol.so");
 const UNIT: u64 = 1_000_000;
 
-fn read_user(ctx: &AnchorLiteSVM, pda: Pubkey) -> UserState {
+fn read_user(ctx: &AnchorContext, pda: Pubkey) -> UserState {
     let account = ctx.svm.get_account(&pda).expect("user state");
     let mut data = account.data.as_slice();
     UserState::try_deserialize(&mut data).expect("deserialize user")
@@ -160,8 +160,8 @@ fn grace_preserves_self_and_network_temporarily_then_inactivity_expires_them() {
     ctx.svm.set_sysvar(&clock);
     ctx.svm.expire_blockhash();
 
-    let treasury_before = ctx.svm.get_token_account(&treasury_usdc).expect("treasury token").amount;
-    let vault_before = ctx.svm.get_token_account(&vault_usdc).expect("vault token").amount;
+    ctx.svm.assert_token_balance(&treasury_usdc, 39_958_000);
+    ctx.svm.assert_token_balance(&vault_usdc, 70_042_000);
 
     let settle = ctx.program()
         .accounts(service_referral_protocol::accounts::SettleExpired {
@@ -179,10 +179,8 @@ fn grace_preserves_self_and_network_temporarily_then_inactivity_expires_them() {
     assert_eq!(sponsor_inactive.network_pending_usdc, 0);
     assert_eq!(sponsor_inactive.lifetime_expired_usdc, 20_022_000u128);
 
-    let treasury_after = ctx.svm.get_token_account(&treasury_usdc).expect("treasury token after").amount;
-    let vault_after = ctx.svm.get_token_account(&vault_usdc).expect("vault token after").amount;
-    assert_eq!(treasury_after - treasury_before, 20_022_000);
-    assert_eq!(vault_before - vault_after, 20_022_000);
+    ctx.svm.assert_token_balance(&treasury_usdc, 59_980_000);
+    ctx.svm.assert_token_balance(&vault_usdc, 50_020_000);
 
     // A second settlement must fail and cannot transfer the same expired value twice.
     ctx.svm.expire_blockhash();
@@ -196,6 +194,6 @@ fn grace_preserves_self_and_network_temporarily_then_inactivity_expires_them() {
         .instruction().expect("second settle");
     let second = ctx.execute_instruction(settle_again, &[&buyer]).expect("second settle result");
     assert!(!second.is_success(), "expired value must not be settleable twice");
-    ctx.svm.assert_token_balance(&treasury_usdc, treasury_after);
-    ctx.svm.assert_token_balance(&vault_usdc, vault_after);
+    ctx.svm.assert_token_balance(&treasury_usdc, 59_980_000);
+    ctx.svm.assert_token_balance(&vault_usdc, 50_020_000);
 }

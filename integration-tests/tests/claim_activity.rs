@@ -1,5 +1,5 @@
 use anchor_lang::{prelude::*, AccountDeserialize};
-use anchor_litesvm::{AnchorLiteSVM, AssertionHelpers, TestHelpers};
+use anchor_litesvm::{AnchorContext, AnchorLiteSVM, AssertionHelpers, TestHelpers};
 use service_referral_protocol::{state::{ProtocolState, UserState}, ID};
 use solana_signer::Signer;
 use solana_transaction::Transaction;
@@ -7,13 +7,13 @@ use solana_transaction::Transaction;
 const PROGRAM_BYTES: &[u8] = include_bytes!("../../target/deploy/service_referral_protocol.so");
 const UNIT: u64 = 1_000_000;
 
-fn read_user(ctx: &AnchorLiteSVM, pda: Pubkey) -> UserState {
+fn read_user(ctx: &AnchorContext, pda: Pubkey) -> UserState {
     let account = ctx.svm.get_account(&pda).expect("user state");
     let mut data = account.data.as_slice();
     UserState::try_deserialize(&mut data).expect("deserialize user")
 }
 
-fn read_protocol(ctx: &AnchorLiteSVM, pda: Pubkey) -> ProtocolState {
+fn read_protocol(ctx: &AnchorContext, pda: Pubkey) -> ProtocolState {
     let account = ctx.svm.get_account(&pda).expect("protocol state");
     let mut data = account.data.as_slice();
     ProtocolState::try_deserialize(&mut data).expect("deserialize protocol")
