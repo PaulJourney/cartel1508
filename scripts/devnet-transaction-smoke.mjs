@@ -246,7 +246,6 @@ const buyerPurchaseIx = await program.methods
     upline6: technicalRoot,
     upline7: technicalRoot,
     upline8: technicalRoot,
-    upline9: technicalRoot,
     batch: buyerBatch0,
     tokenProgram: TOKEN_PROGRAM_ID,
     systemProgram: SystemProgram.programId,
@@ -271,7 +270,7 @@ const protocolStateBeforeClaims = await program.account.protocolState.fetch(prot
 
 invariant(asBigInt(sponsorState.pioneerId) === 1n, "sponsor must be Pioneer #1");
 invariant(asBigInt(buyerState.pioneerId) === 2n, "buyer must be Pioneer #2");
-invariant(asBigInt(sponsorState.directAccruedUsdt) === 50n * TOKEN_SCALE, "sponsor direct reward must be exactly 50%");
+invariant(asBigInt(sponsorState.selfAccruedUsdt) === 50n * TOKEN_SCALE, "sponsor direct reward must be exactly 50%");
 invariant(asBigInt(sponsorState.networkClaimableUsdt) === 0n, "L1 sponsor must not receive a duplicate network share");
 invariant(asBigInt(buyerState.lifetimeServiceUnits) === 100n, "buyer must own 100 logical units");
 invariant(asBigInt(sponsorState.activeUntil) >= BigInt(await chainUnixTime(connection)), "sponsor must remain ACTIVE");
@@ -322,7 +321,7 @@ invariant(sponsorToken.amount === 50_022_000n, "sponsor claim must pay exactly 5
 invariant(buyerToken.amount === 20_000n, "buyer Pioneer claim must pay exactly 0.020 USDT");
 invariant(treasuryToken.amount === 59_958_000n, "claims must not change treasury balance");
 invariant(vaultToken.amount === 0n, "all test liabilities must be fully claimable and leave vault empty");
-invariant(asBigInt(sponsorAfter.directAccruedUsdt) === 0n, "sponsor direct bucket must clear after claim");
+invariant(asBigInt(sponsorAfter.selfAccruedUsdt) === 0n, "sponsor direct bucket must clear after claim");
 invariant(asBigInt(sponsorAfter.lifetimeClaimedUsdt) === 50_022_000n, "sponsor lifetime claim metric mismatch");
 invariant(asBigInt(buyerAfter.lifetimeClaimedUsdt) === 20_000n, "buyer lifetime claim metric mismatch");
 

@@ -11,14 +11,14 @@ pub const PIONEER_SLOTS: u16 = 100;
 pub const PIONEER_SCALE: u128 = 1_000_000_000_000_000_000;
 
 pub const BPS_DENOMINATOR: u64 = 10_000;
-pub const DIRECT_BPS: u64 = 5_000;
+pub const SELF_BPS: u64 = 5_000;
 pub const NETWORK_BPS: u64 = 4_300;
 pub const PIONEER_BPS: u64 = 200;
 pub const SERVICE_BPS: u64 = 500;
 
-// Frozen production genealogy:
-// L1 = direct sponsor and receives DIRECT_BPS only.
-// The 43% network pool is distributed over genealogical L2-L10.
+// Frozen production economics:
+// SELF = buyer and receives SELF_BPS.
+// The 43% network pool is distributed over exactly nine uplines, starting with sponsor.
 pub const PURCHASE_NETWORK_LEVEL_BPS: [u64; 9] =
     [1_500, 900, 600, 400, 250, 200, 150, 100, 200];
 
@@ -35,6 +35,6 @@ pub const MAINNET_SERVICE_TREASURY: Pubkey =
 pub const MAINNET_REGISTRATION_OPEN_AT: i64 = 0;
 
 pub fn percentages_valid() -> bool {
-    DIRECT_BPS + NETWORK_BPS + PIONEER_BPS + SERVICE_BPS == BPS_DENOMINATOR
+    SELF_BPS + NETWORK_BPS + PIONEER_BPS + SERVICE_BPS == BPS_DENOMINATOR
         && PURCHASE_NETWORK_LEVEL_BPS.iter().copied().sum::<u64>() == NETWORK_BPS
 }

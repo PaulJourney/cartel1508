@@ -144,7 +144,6 @@ fn purchase_is_the_single_revenue_event_and_recipients_pull_claims() {
             upline_6: technical_root,
             upline_7: technical_root,
             upline_8: technical_root,
-            upline_9: technical_root,
             batch: sponsor_batch,
             token_program: spl_token::id(),
             system_program: anchor_lang::system_program::ID,
@@ -202,7 +201,6 @@ fn purchase_is_the_single_revenue_event_and_recipients_pull_claims() {
             upline_6: technical_root,
             upline_7: technical_root,
             upline_8: technical_root,
-            upline_9: technical_root,
             batch: buyer_batch,
             token_program: spl_token::id(),
             system_program: anchor_lang::system_program::ID,
@@ -235,7 +233,7 @@ fn purchase_is_the_single_revenue_event_and_recipients_pull_claims() {
     let sponsor_account = ctx.svm.get_account(&sponsor_pda).expect("sponsor state");
     let mut sponsor_data = sponsor_account.data.as_slice();
     let sponsor_state = UserState::try_deserialize(&mut sponsor_data).expect("deserialize sponsor");
-    assert_eq!(sponsor_state.direct_accrued_usdc, direct);
+    assert_eq!(sponsor_state.self_accrued_usdc, direct);
     assert_eq!(sponsor_state.network_claimable_usdc, 0);
     assert!(sponsor_state.active_until > 0);
 
@@ -299,6 +297,6 @@ fn purchase_is_the_single_revenue_event_and_recipients_pull_claims() {
     let sponsor_account = ctx.svm.get_account(&sponsor_pda).expect("sponsor after claim");
     let mut sponsor_data = sponsor_account.data.as_slice();
     let sponsor_state = UserState::try_deserialize(&mut sponsor_data).expect("deserialize sponsor after claim");
-    assert_eq!(sponsor_state.direct_accrued_usdc, 0);
+    assert_eq!(sponsor_state.self_accrued_usdc, 0);
     assert_eq!(sponsor_state.lifetime_claimed_usdc, sponsor_claim as u128);
 }

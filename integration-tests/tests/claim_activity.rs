@@ -146,7 +146,6 @@ fn inactive_sponsor_rewards_are_treasury_destined_and_cannot_be_claimed() {
             upline_6: technical_root,
             upline_7: technical_root,
             upline_8: technical_root,
-            upline_9: technical_root,
             batch: buyer_batch,
             token_program: spl_token::id(),
             system_program: anchor_lang::system_program::ID,
@@ -161,7 +160,7 @@ fn inactive_sponsor_rewards_are_treasury_destined_and_cannot_be_claimed() {
     let sponsor_after_purchase = read_user(&ctx, sponsor_pda);
     let protocol_after_purchase = read_protocol(&ctx, protocol);
     assert_eq!(sponsor_after_purchase.active_until, 0);
-    assert_eq!(sponsor_after_purchase.direct_accrued_usdc, 0);
+    assert_eq!(sponsor_after_purchase.self_accrued_usdc, 0);
     assert_eq!(sponsor_after_purchase.lifetime_expired_usdc, 50 * UNIT as u128);
     assert_eq!(protocol_after_purchase.lifetime_expired_usdc, 50 * UNIT as u128);
 

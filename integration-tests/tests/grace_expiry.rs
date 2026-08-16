@@ -91,7 +91,6 @@ fn grace_preserves_unclaimed_direct_temporarily_then_inactivity_expires_it() {
             direct_referrer: technical_root,
             upline_1: technical_root, upline_2: technical_root, upline_3: technical_root,
             upline_4: technical_root, upline_5: technical_root, upline_6: technical_root,
-            upline_7: technical_root, upline_8: technical_root, upline_9: technical_root,
             batch: sponsor_batch, token_program: spl_token::id(),
             system_program: anchor_lang::system_program::ID,
         })
@@ -127,7 +126,6 @@ fn grace_preserves_unclaimed_direct_temporarily_then_inactivity_expires_it() {
             direct_referrer: sponsor_pda,
             upline_1: technical_root, upline_2: technical_root, upline_3: technical_root,
             upline_4: technical_root, upline_5: technical_root, upline_6: technical_root,
-            upline_7: technical_root, upline_8: technical_root, upline_9: technical_root,
             batch: buyer_batch, token_program: spl_token::id(),
             system_program: anchor_lang::system_program::ID,
         })
@@ -136,7 +134,7 @@ fn grace_preserves_unclaimed_direct_temporarily_then_inactivity_expires_it() {
     ctx.execute_instruction(buyer_purchase, &[&buyer]).expect("buyer purchase tx").assert_success();
 
     let sponsor_grace = read_user(&ctx, sponsor_pda);
-    assert_eq!(sponsor_grace.direct_accrued_usdc, 50 * UNIT, "GRACE must temporarily preserve the L1 direct reward");
+    assert_eq!(sponsor_grace.self_accrued_usdc, 50 * UNIT, "GRACE must temporarily preserve the L1 direct reward");
     assert_eq!(sponsor_grace.lifetime_expired_usdc, 0);
 
     // Claim is intentionally ACTIVE-only, so even during GRACE the sponsor cannot withdraw.
@@ -149,7 +147,7 @@ fn grace_preserves_unclaimed_direct_temporarily_then_inactivity_expires_it() {
         .instruction().expect("grace claim");
     let grace_claim_result = ctx.execute_instruction(claim_during_grace, &[&sponsor]).expect("grace claim result");
     assert!(!grace_claim_result.is_success(), "GRACE user must reactivate before claiming");
-    assert_eq!(read_user(&ctx, sponsor_pda).direct_accrued_usdc, 50 * UNIT);
+    assert_eq!(read_user(&ctx, sponsor_pda).self_accrued_usdc, 50 * UNIT);
 
     // Miss the grace deadline. Permissionless settlement must irreversibly clear the
     // 50 direct plus sponsor's 0.022 Pioneer due (0.002 own activation + 0.020 buyer purchase).
@@ -171,7 +169,7 @@ fn grace_preserves_unclaimed_direct_temporarily_then_inactivity_expires_it() {
     ctx.execute_instruction(settle, &[&buyer]).expect("settle tx").assert_success();
 
     let sponsor_inactive = read_user(&ctx, sponsor_pda);
-    assert_eq!(sponsor_inactive.direct_accrued_usdc, 0);
+    assert_eq!(sponsor_inactive.self_accrued_usdc, 0);
     assert_eq!(sponsor_inactive.network_claimable_usdc, 0);
     assert_eq!(sponsor_inactive.network_pending_usdc, 0);
     assert_eq!(sponsor_inactive.lifetime_expired_usdc, 50_022_000u128);

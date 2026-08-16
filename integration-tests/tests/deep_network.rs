@@ -186,7 +186,6 @@ fn full_genealogy_pays_l1_direct_and_l2_through_l10_but_never_l11() {
                 upline_6: uplines[5],
                 upline_7: uplines[6],
                 upline_8: uplines[7],
-                upline_9: uplines[8],
                 batch,
                 token_program: spl_token::id(),
                 system_program: anchor_lang::system_program::ID,
@@ -248,7 +247,6 @@ fn full_genealogy_pays_l1_direct_and_l2_through_l10_but_never_l11() {
             upline_6: user_pdas[4],
             upline_7: user_pdas[3],
             upline_8: user_pdas[2],
-            upline_9: user_pdas[1],
             batch: buyer_batch,
             token_program: spl_token::id(),
             system_program: anchor_lang::system_program::ID,
@@ -269,7 +267,7 @@ fn full_genealogy_pays_l1_direct_and_l2_through_l10_but_never_l11() {
 
     // L1 receives exactly the direct 50% and no network-depth reward.
     assert_eq!(
-        after[10].direct_accrued_usdc - before[10].direct_accrued_usdc,
+        after[10].self_accrued_usdc - before[10].self_accrued_usdc,
         50 * UNIT
     );
     assert_eq!(

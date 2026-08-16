@@ -210,7 +210,6 @@ fn false_upline_cannot_move_tokens_create_units_or_leave_partial_rewards() {
             upline_6: technical_root,
             upline_7: technical_root,
             upline_8: technical_root,
-            upline_9: technical_root,
             batch: buyer_batch,
             token_program: spl_token::id(),
             system_program: anchor_lang::system_program::ID,
@@ -246,8 +245,8 @@ fn false_upline_cannot_move_tokens_create_units_or_leave_partial_rewards() {
     assert_eq!(buyer_after.next_batch_index, buyer_before.next_batch_index);
     assert_eq!(buyer_after.active_until, buyer_before.active_until);
     assert_eq!(
-        l1_after.direct_accrued_usdc,
-        l1_before.direct_accrued_usdc
+        l1_after.self_accrued_usdc,
+        l1_before.self_accrued_usdc
     );
     assert_eq!(protocol_after.next_unit_id, protocol_before.next_unit_id);
     assert_eq!(

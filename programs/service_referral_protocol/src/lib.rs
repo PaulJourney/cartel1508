@@ -79,8 +79,8 @@ pub mod service_referral_protocol {
         root.qualification_window_started_at = 0;
         root.lifetime_service_units = 0;
         root.next_batch_index = 0;
-        root.direct_accrued_usdt = 0;
-        root.direct_accrued_usdc = 0;
+        root.self_accrued_usdt = 0;
+        root.self_accrued_usdc = 0;
         root.network_claimable_usdt = 0;
         root.network_claimable_usdc = 0;
         root.network_pending_usdt = 0;
@@ -133,8 +133,8 @@ pub mod service_referral_protocol {
         u.qualification_window_started_at = 0;
         u.lifetime_service_units = 0;
         u.next_batch_index = 0;
-        u.direct_accrued_usdt = 0;
-        u.direct_accrued_usdc = 0;
+        u.self_accrued_usdt = 0;
+        u.self_accrued_usdc = 0;
         u.network_claimable_usdt = 0;
         u.network_claimable_usdc = 0;
         u.network_pending_usdt = 0;
@@ -153,8 +153,8 @@ pub mod service_referral_protocol {
     /// One buyer-signed transaction:
     /// - transfers exactly `units * 1 stablecoin` into the canonical vault;
     /// - allocates globally unique units and updates buyer activity;
-    /// - credits eligible L1 direct sponsor with 50%;
-    /// - credits eligible genealogical L2-L10 with the frozen 43% schedule;
+    /// - credits the buyer/self economic level with 50%;
+    /// - credits the immutable sponsor plus eight ancestors with the frozen 43% schedule;
     /// - accrues the 2% Pioneer pool;
     /// - routes the 5% service allocation plus unallocated/expired value to treasury.
     ///
@@ -260,23 +260,34 @@ pub mod service_referral_protocol {
         batch.last_unit_id = last_unit_id;
         batch.purchased_at = now;
 
-        let (direct, levels, pioneer, service, rounding_remainder) =
+        let (self_reward, levels, pioneer, service, rounding_remainder) =
             split_purchase_amount(payment)?;
         let p = &mut ctx.accounts.protocol;
         let mut unallocated: u64 = 0;
         let mut expired_flow: u64 = 0;
 
+        // Pioneer index is advanced before activity settlement so an INACTIVE buyer
+        // or upline cannot leave their newly-created Pioneer entitlement stranded.
+        let pioneer_unassigned = accrue_pioneer(p, mint, pioneer)?;
+
+        // Economic L0/L1 SELF: the buyer always receives the 50% bucket. The buyer's
+        // activity has already been updated by this purchase. ACTIVE can claim; GRACE
+        // preserves the reward until requalification; INACTIVE is IC-A treasury expiry.
+        add_self_reward(&mut ctx.accounts.user, p, mint, self_reward)?;
+        let buyer_expired = expire_unclaimed_for_mint(&mut ctx.accounts.user, now, p, mint)?;
+        expired_flow = expired_flow
+            .checked_add(buyer_expired)
+            .ok_or(ProtocolError::ArithmeticOverflow)?;
+
+        // The 43% network pool contains exactly nine uplines. The immutable direct
+        // referrer/sponsor is network slot 1 (15%), followed by eight ancestors.
         if ctx.accounts.direct_referrer.is_technical_root() {
-            unallocated = unallocated
-                .checked_add(direct)
-                .ok_or(ProtocolError::ArithmeticOverflow)?;
             for level in levels {
                 unallocated = unallocated
                     .checked_add(level)
                     .ok_or(ProtocolError::ArithmeticOverflow)?;
             }
         } else {
-            // Settle any prior unclaimed value if L1 is already inactive.
             let prior_expired = expire_unclaimed_for_mint(
                 &mut ctx.accounts.direct_referrer,
                 now,
@@ -287,15 +298,17 @@ pub mod service_referral_protocol {
                 .checked_add(prior_expired)
                 .ok_or(ProtocolError::ArithmeticOverflow)?;
 
-            // L1 is the direct sponsor and receives 50% only while ACTIVE/GRACE.
             match activity_status(&ctx.accounts.direct_referrer, now) {
-                ActivityStatus::Active | ActivityStatus::Grace => {
-                    add_direct(&mut ctx.accounts.direct_referrer, p, mint, direct)?;
+                ActivityStatus::Active => {
+                    add_network_claimable(&mut ctx.accounts.direct_referrer, p, mint, levels[0])?
+                }
+                ActivityStatus::Grace => {
+                    add_network_pending(&mut ctx.accounts.direct_referrer, p, mint, levels[0])?
                 }
                 ActivityStatus::Inactive => {
-                    mark_user_expired(&mut ctx.accounts.direct_referrer, p, mint, direct)?;
+                    mark_user_expired(&mut ctx.accounts.direct_referrer, p, mint, levels[0])?;
                     expired_flow = expired_flow
-                        .checked_add(direct)
+                        .checked_add(levels[0])
                         .ok_or(ProtocolError::ArithmeticOverflow)?;
                 }
             }
@@ -309,12 +322,13 @@ pub mod service_referral_protocol {
                 ctx.accounts.upline_6.as_ref(),
                 ctx.accounts.upline_7.as_ref(),
                 ctx.accounts.upline_8.as_ref(),
-                ctx.accounts.upline_9.as_ref(),
             ];
             let mut expected_wallet = ctx.accounts.direct_referrer.referrer;
 
-            for i in 0..9 {
-                let ai = &uplines[i];
+            // levels[0] belongs to the sponsor; levels[1]..levels[8] belong to the
+            // next eight ancestors. No tenth upline account can receive value.
+            for i in 1..9 {
+                let ai = &uplines[i - 1];
                 let expected_key = Pubkey::find_program_address(
                     &[b"user", expected_wallet.as_ref()],
                     &crate::ID,
@@ -360,7 +374,6 @@ pub mod service_referral_protocol {
             }
         }
 
-        let pioneer_unassigned = accrue_pioneer(p, mint, pioneer)?;
         let treasury_now = service
             .checked_add(rounding_remainder)
             .ok_or(ProtocolError::ArithmeticOverflow)?
@@ -566,36 +579,33 @@ pub struct PurchaseAndDistribute<'info> {
     pub service_treasury_usdt: Box<Account<'info, TokenAccount>>,
     #[account(mut)]
     pub service_treasury_usdc: Box<Account<'info, TokenAccount>>,
-    /// Direct sponsor = genealogical L1.
+    /// Immutable direct sponsor = first network upline (15%).
     #[account(mut)]
     pub direct_referrer: Box<Account<'info, UserState>>,
-    /// CHECK: genealogical L2; verified dynamically against immutable ancestry.
+    /// CHECK: second network upline (9%); verified dynamically against ancestry.
     #[account(mut)]
     pub upline_1: UncheckedAccount<'info>,
-    /// CHECK: genealogical L3.
+    /// CHECK: third network upline (6%).
     #[account(mut)]
     pub upline_2: UncheckedAccount<'info>,
-    /// CHECK: genealogical L4.
+    /// CHECK: fourth network upline (4%).
     #[account(mut)]
     pub upline_3: UncheckedAccount<'info>,
-    /// CHECK: genealogical L5.
+    /// CHECK: fifth network upline (2.5%).
     #[account(mut)]
     pub upline_4: UncheckedAccount<'info>,
-    /// CHECK: genealogical L6.
+    /// CHECK: sixth network upline (2%).
     #[account(mut)]
     pub upline_5: UncheckedAccount<'info>,
-    /// CHECK: genealogical L7.
+    /// CHECK: seventh network upline (1.5%).
     #[account(mut)]
     pub upline_6: UncheckedAccount<'info>,
-    /// CHECK: genealogical L8.
+    /// CHECK: eighth network upline (1%).
     #[account(mut)]
     pub upline_7: UncheckedAccount<'info>,
-    /// CHECK: genealogical L9.
+    /// CHECK: ninth network upline (2%).
     #[account(mut)]
     pub upline_8: UncheckedAccount<'info>,
-    /// CHECK: genealogical L10.
-    #[account(mut)]
-    pub upline_9: UncheckedAccount<'info>,
     #[account(
         init,
         payer = wallet,
@@ -768,20 +778,20 @@ fn update_activity_after_purchase(
     Ok(())
 }
 
-fn add_direct(
+fn add_self_reward(
     user: &mut UserState,
     p: &ProtocolState,
     mint: Pubkey,
     amount: u64,
 ) -> Result<()> {
     if mint == p.usdt_mint {
-        user.direct_accrued_usdt = user
-            .direct_accrued_usdt
+        user.self_accrued_usdt = user
+            .self_accrued_usdt
             .checked_add(amount)
             .ok_or(ProtocolError::ArithmeticOverflow)?;
     } else if mint == p.usdc_mint {
-        user.direct_accrued_usdc = user
-            .direct_accrued_usdc
+        user.self_accrued_usdc = user
+            .self_accrued_usdc
             .checked_add(amount)
             .ok_or(ProtocolError::ArithmeticOverflow)?;
     } else {
@@ -898,21 +908,21 @@ fn expire_unclaimed_for_mint(
     let pioneer = pioneer_due(user, p, mint)?;
     let (direct, network_claimable, network_pending) = if mint == p.usdt_mint {
         let values = (
-            user.direct_accrued_usdt,
+            user.self_accrued_usdt,
             user.network_claimable_usdt,
             user.network_pending_usdt,
         );
-        user.direct_accrued_usdt = 0;
+        user.self_accrued_usdt = 0;
         user.network_claimable_usdt = 0;
         user.network_pending_usdt = 0;
         values
     } else if mint == p.usdc_mint {
         let values = (
-            user.direct_accrued_usdc,
+            user.self_accrued_usdc,
             user.network_claimable_usdc,
             user.network_pending_usdc,
         );
-        user.direct_accrued_usdc = 0;
+        user.self_accrued_usdc = 0;
         user.network_claimable_usdc = 0;
         user.network_pending_usdc = 0;
         values
@@ -1075,15 +1085,15 @@ fn take_claimable(
     mint: Pubkey,
 ) -> Result<(u64, u64)> {
     if mint == p.usdt_mint {
-        let direct = user.direct_accrued_usdt;
+        let direct = user.self_accrued_usdt;
         let network = user.network_claimable_usdt;
-        user.direct_accrued_usdt = 0;
+        user.self_accrued_usdt = 0;
         user.network_claimable_usdt = 0;
         Ok((direct, network))
     } else if mint == p.usdc_mint {
-        let direct = user.direct_accrued_usdc;
+        let direct = user.self_accrued_usdc;
         let network = user.network_claimable_usdc;
-        user.direct_accrued_usdc = 0;
+        user.self_accrued_usdc = 0;
         user.network_claimable_usdc = 0;
         Ok((direct, network))
     } else {

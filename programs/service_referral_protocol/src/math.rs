@@ -13,10 +13,10 @@ pub fn mul_bps(amount: u64, bps: u64) -> Result<u64> {
 }
 
 /// Final production split for purchase-triggered economics.
-/// L1 is the direct sponsor and receives DIRECT_BPS only. `levels[0]` therefore
-/// corresponds to genealogical L2 and `levels[8]` to genealogical L10.
+/// The buyer receives SELF_BPS. `levels[0]` is the immutable sponsor and
+/// `levels[8]` is the ninth network upline.
 pub fn split_purchase_amount(amount: u64) -> Result<(u64, [u64; 9], u64, u64, u64)> {
-    let direct = mul_bps(amount, DIRECT_BPS)?;
+    let self_reward = mul_bps(amount, SELF_BPS)?;
     let pioneer = mul_bps(amount, PIONEER_BPS)?;
     let service = mul_bps(amount, SERVICE_BPS)?;
 
@@ -29,7 +29,7 @@ pub fn split_purchase_amount(amount: u64) -> Result<(u64, [u64; 9], u64, u64, u6
             .ok_or(ProtocolError::ArithmeticOverflow)?;
     }
 
-    let allocated = direct
+    let allocated = self_reward
         .checked_add(network_sum)
         .ok_or(ProtocolError::ArithmeticOverflow)?
         .checked_add(pioneer)
@@ -40,7 +40,7 @@ pub fn split_purchase_amount(amount: u64) -> Result<(u64, [u64; 9], u64, u64, u6
         .checked_sub(allocated)
         .ok_or(ProtocolError::ArithmeticUnderflow)?;
 
-    Ok((direct, levels, pioneer, service, rounding_remainder))
+    Ok((self_reward, levels, pioneer, service, rounding_remainder))
 }
 
 pub fn allocate_unit_range(next_unit_id: u128, units: u64) -> Result<(u128, u128, u128)> {
@@ -74,9 +74,9 @@ mod tests {
     #[test]
     fn purchase_percentages_conserve_one_usdc() {
         let amount = 1_000_000u64;
-        let (direct, levels, pioneer, service, remainder) =
+        let (self_reward, levels, pioneer, service, remainder) =
             split_purchase_amount(amount).unwrap();
-        assert_eq!(direct, 500_000);
+        assert_eq!(self_reward, 500_000);
         assert_eq!(
             levels,
             [150_000, 90_000, 60_000, 40_000, 25_000, 20_000, 15_000, 10_000, 20_000]
@@ -161,19 +161,19 @@ mod tests {
     }
 
     fn assert_split_conservation(amount: u64) {
-        let (direct, levels, pioneer, service, remainder) =
+        let (self_reward, levels, pioneer, service, remainder) =
             split_purchase_amount(amount).unwrap();
         let network = levels
             .iter()
             .fold(0u128, |acc, value| acc + (*value as u128));
-        let total = (direct as u128)
+        let total = (self_reward as u128)
             + network
             + (pioneer as u128)
             + (service as u128)
             + (remainder as u128);
 
         assert_eq!(total, amount as u128);
-        assert!(direct <= amount);
+        assert!(self_reward <= amount);
         assert!(pioneer <= amount);
         assert!(service <= amount);
         assert!(levels.iter().all(|value| *value <= amount));
