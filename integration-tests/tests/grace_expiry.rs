@@ -29,12 +29,6 @@ fn grace_preserves_self_and_network_temporarily_then_inactivity_expires_them() {
     let (technical_root, _) = Pubkey::find_program_address(&[b"user", Pubkey::default().as_ref()], &ID);
     let (sponsor_pda, _) = Pubkey::find_program_address(&[b"user", sponsor.pubkey().as_ref()], &ID);
     let (buyer_pda, _) = Pubkey::find_program_address(&[b"user", buyer.pubkey().as_ref()], &ID);
-    let (sponsor_batch, _) = Pubkey::find_program_address(
-        &[b"batch", sponsor.pubkey().as_ref(), &0u64.to_le_bytes()], &ID,
-    );
-    let (buyer_batch, _) = Pubkey::find_program_address(
-        &[b"batch", buyer.pubkey().as_ref(), &0u64.to_le_bytes()], &ID,
-    );
 
     let registration_open_at = ctx.svm.get_sysvar::<Clock>().unix_timestamp;
     let initialize_ix = ctx.program()

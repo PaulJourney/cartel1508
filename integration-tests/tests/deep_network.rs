@@ -158,10 +158,6 @@ fn full_genealogy_pays_self_and_nine_uplines_but_never_tenth_upline() {
                 ancestor -= 1;
             }
         }
-        let (batch, _) = Pubkey::find_program_address(
-            &[b"batch", wallets[i].pubkey().as_ref(), &0u64.to_le_bytes()],
-            &ID,
-        );
 
         let purchase_ix = ctx
             .program()
@@ -214,14 +210,6 @@ fn full_genealogy_pays_self_and_nine_uplines_but_never_tenth_upline() {
             100 * UNIT,
         )
         .expect("mint buyer funds");
-    let (buyer_batch, _) = Pubkey::find_program_address(
-        &[
-            b"batch",
-            wallets[buyer_index].pubkey().as_ref(),
-            &0u64.to_le_bytes(),
-        ],
-        &ID,
-    );
 
     // buyer receives SELF 50%; sponsor index10 is U1, then indices9..2 are U2..U9.
     let target_ix = ctx
@@ -245,7 +233,6 @@ fn full_genealogy_pays_self_and_nine_uplines_but_never_tenth_upline() {
             upline_6: user_pdas[4],
             upline_7: user_pdas[3],
             upline_8: user_pdas[2],
-            batch: buyer_batch,
             token_program: spl_token::id(),
             system_program: anchor_lang::system_program::ID,
         })

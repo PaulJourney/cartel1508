@@ -26,14 +26,6 @@ fn purchase_is_the_single_revenue_event_and_recipients_pull_claims() {
     let (technical_root, _) = Pubkey::find_program_address(&[b"user", Pubkey::default().as_ref()], &ID);
     let (sponsor_pda, _) = Pubkey::find_program_address(&[b"user", sponsor.pubkey().as_ref()], &ID);
     let (buyer_pda, _) = Pubkey::find_program_address(&[b"user", buyer.pubkey().as_ref()], &ID);
-    let (sponsor_batch, _) = Pubkey::find_program_address(
-        &[b"batch", sponsor.pubkey().as_ref(), &0u64.to_le_bytes()],
-        &ID,
-    );
-    let (buyer_batch, _) = Pubkey::find_program_address(
-        &[b"batch", buyer.pubkey().as_ref(), &0u64.to_le_bytes()],
-        &ID,
-    );
 
     let registration_open_at = ctx.svm.get_sysvar::<Clock>().unix_timestamp;
     let initialize_ix = ctx
@@ -144,7 +136,6 @@ fn purchase_is_the_single_revenue_event_and_recipients_pull_claims() {
             upline_6: technical_root,
             upline_7: technical_root,
             upline_8: technical_root,
-            batch: sponsor_batch,
             token_program: spl_token::id(),
             system_program: anchor_lang::system_program::ID,
         })
@@ -201,7 +192,6 @@ fn purchase_is_the_single_revenue_event_and_recipients_pull_claims() {
             upline_6: technical_root,
             upline_7: technical_root,
             upline_8: technical_root,
-            batch: buyer_batch,
             token_program: spl_token::id(),
             system_program: anchor_lang::system_program::ID,
         })

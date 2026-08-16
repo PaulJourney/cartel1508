@@ -74,10 +74,11 @@ The same ACTIVE / GRACE / INACTIVE logic applies to fixed network-upline shares.
 The protocol does not send one transaction to every reward recipient.
 
 - Registration: the registering wallet signs and pays SOL transaction/account-creation costs.
-- Unit purchase: the buyer signs once and pays the Solana transaction fee. The same transaction transfers USDT/USDC into the protocol vault, creates the unit batch, updates activity and performs 50/43/2/5 accounting.
+- Unit purchase: the buyer signs once and pays the Solana transaction fee. The same transaction transfers USDT/USDC into the protocol vault, updates activity and performs 50/43/2/5 accounting. It creates no per-purchase rent account.
 - Reward accrual: sponsor/uplines/Pioneers do not sign and pay no gas merely because accounting credit is created.
 - Claim: an ACTIVE beneficiary signs a separate claim transaction and pays its own SOL fee. Multiple accruals can be accumulated and withdrawn together.
 - Expiration settlement: treasury-destined value can be physically settled permissionlessly; whoever submits that transaction pays its SOL fee. No permanent platform keeper is required.
+- Purchase history: global logical Unit IDs, purchase index, mint, unit count and timestamp are emitted in the `UnitsPurchased` event. No `UnitBatch` PDA is created, so repeated/unlimited purchases do not accumulate per-purchase account rent.
 
 ## Final production surface
 

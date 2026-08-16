@@ -57,7 +57,8 @@ checks = {
     'initialization uses typed SPL Mint accounts': "pub usdt_mint: Box<Account<'info, Mint>>" in source and "pub usdc_mint: Box<Account<'info, Mint>>" in source,
     'stablecoin mints require six decimals': source.count('decimals == TOKEN_DECIMALS as u8') >= 2 and 'InvalidTokenDecimals' in source,
     'USDT and USDC mint accounts must differ': 'usdt_mint.key() != ctx.accounts.usdc_mint.key()' in source and 'DuplicateStablecoinMint' in source,
-    'service units use global monotonic Unit IDs': all(x in state for x in ['next_unit_id', 'first_unit_id', 'last_unit_id']) and 'allocate_unit_range(ctx.accounts.protocol.next_unit_id, units)' in final_purchase and 'ctx.accounts.protocol.next_unit_id = next_unit_id' in final_purchase and 'first_local_unit_index' not in source and 'last_local_unit_index' not in source,
+    'service units use global monotonic Unit IDs': 'next_unit_id' in state and all(x in source for x in ['pub struct UnitsPurchased', 'first_unit_id: u128', 'last_unit_id: u128', 'purchase_index: u64', 'emit!(UnitsPurchased', 'allocate_unit_range(ctx.accounts.protocol.next_unit_id, units)', 'ctx.accounts.protocol.next_unit_id = next_unit_id']) and 'first_local_unit_index' not in source and 'last_local_unit_index' not in source,
+    'purchase has no per-purchase rent account': 'UnitBatch' not in state and 'UnitBatch' not in source and 'pub batch:' not in production_accounts and 'payer = wallet' not in production_accounts and 'pub system_program' not in production_accounts,
 }
 
 for name, ok in checks.items():

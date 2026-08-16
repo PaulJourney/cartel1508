@@ -78,9 +78,6 @@ fn ten_single_unit_purchases_preserve_same_self_and_pioneer_as_one_ten_unit_purc
     ctx.svm.mint_to(&usdc_mint.pubkey(), &buyer_usdc, &initializer, 10 * UNIT).expect("fund buyer");
 
     for batch_index in 0u64..10 {
-        let (batch, _) = Pubkey::find_program_address(
-            &[b"batch", buyer.pubkey().as_ref(), &batch_index.to_le_bytes()], &ID,
-        );
         let ix = ctx.program()
             .accounts(service_referral_protocol::accounts::PurchaseAndDistribute {
                 wallet: buyer.pubkey(), protocol, user: buyer_pda, user_source: buyer_usdc,

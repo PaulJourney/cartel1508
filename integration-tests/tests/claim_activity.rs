@@ -35,10 +35,6 @@ fn inactive_sponsor_rewards_are_treasury_destined_and_cannot_be_claimed() {
     let (technical_root, _) = Pubkey::find_program_address(&[b"user", Pubkey::default().as_ref()], &ID);
     let (sponsor_pda, _) = Pubkey::find_program_address(&[b"user", sponsor.pubkey().as_ref()], &ID);
     let (buyer_pda, _) = Pubkey::find_program_address(&[b"user", buyer.pubkey().as_ref()], &ID);
-    let (buyer_batch, _) = Pubkey::find_program_address(
-        &[b"batch", buyer.pubkey().as_ref(), &0u64.to_le_bytes()],
-        &ID,
-    );
 
     let registration_open_at = ctx.svm.get_sysvar::<Clock>().unix_timestamp;
     let initialize_ix = ctx
@@ -147,7 +143,6 @@ fn inactive_sponsor_rewards_are_treasury_destined_and_cannot_be_claimed() {
             upline_6: technical_root,
             upline_7: technical_root,
             upline_8: technical_root,
-            batch: buyer_batch,
             token_program: spl_token::id(),
             system_program: anchor_lang::system_program::ID,
         })

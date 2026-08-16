@@ -78,7 +78,7 @@ pub mod service_referral_protocol {
         root.qualification_progress_units = 0;
         root.qualification_window_started_at = 0;
         root.lifetime_service_units = 0;
-        root.next_batch_index = 0;
+        root.next_purchase_index = 0;
         root.self_accrued_usdt = 0;
         root.self_accrued_usdc = 0;
         root.network_claimable_usdt = 0;
@@ -132,7 +132,7 @@ pub mod service_referral_protocol {
         u.qualification_progress_units = 0;
         u.qualification_window_started_at = 0;
         u.lifetime_service_units = 0;
-        u.next_batch_index = 0;
+        u.next_purchase_index = 0;
         u.self_accrued_usdt = 0;
         u.self_accrued_usdc = 0;
         u.network_claimable_usdt = 0;
@@ -169,7 +169,7 @@ pub mod service_referral_protocol {
         let payment_u128 = (units as u128)
             .checked_mul(TOKEN_SCALE as u128)
             .ok_or(ProtocolError::ArithmeticOverflow)?;
-        let payment = u64::try_from(payment_u128).map_err(|_| ProtocolError::BatchTooLarge)?;
+        let payment = u64::try_from(payment_u128).map_err(|_| ProtocolError::PurchaseTooLarge)?;
         let now = Clock::get()?.unix_timestamp;
         let pre_status = activity_status(&ctx.accounts.user, now);
         let mint = ctx.accounts.user_source.mint;
@@ -243,22 +243,12 @@ pub mod service_referral_protocol {
             allocate_unit_range(ctx.accounts.protocol.next_unit_id, units)?;
         ctx.accounts.protocol.next_unit_id = next_unit_id;
         update_activity_after_purchase(&mut ctx.accounts.user, units, now, pre_status)?;
-        let batch_index = ctx
+        let purchase_index = ctx
             .accounts
             .user
-            .next_batch_index
+            .next_purchase_index
             .checked_sub(1)
             .ok_or(ProtocolError::ArithmeticUnderflow)?;
-
-        let batch = &mut ctx.accounts.batch;
-        batch.bump = ctx.bumps.batch;
-        batch.owner = ctx.accounts.wallet.key();
-        batch.batch_index = batch_index;
-        batch.mint = mint;
-        batch.units = units;
-        batch.first_unit_id = first_unit_id;
-        batch.last_unit_id = last_unit_id;
-        batch.purchased_at = now;
 
         let (self_reward, levels, pioneer, service, rounding_remainder) =
             split_purchase_amount(payment)?;
@@ -413,6 +403,16 @@ pub mod service_referral_protocol {
             rounding_remainder,
             pioneer_unassigned,
         )?;
+
+        emit!(UnitsPurchased {
+            buyer: ctx.accounts.wallet.key(),
+            mint,
+            purchase_index,
+            units,
+            first_unit_id,
+            last_unit_id,
+            purchased_at: now,
+        });
         Ok(())
     }
 
@@ -502,6 +502,17 @@ pub mod service_referral_protocol {
         }
         Ok(())
     }
+}
+
+#[event]
+pub struct UnitsPurchased {
+    pub buyer: Pubkey,
+    pub mint: Pubkey,
+    pub purchase_index: u64,
+    pub units: u64,
+    pub first_unit_id: u128,
+    pub last_unit_id: u128,
+    pub purchased_at: i64,
 }
 
 #[derive(Accounts)]
@@ -606,16 +617,7 @@ pub struct PurchaseAndDistribute<'info> {
     /// CHECK: ninth network upline (2%).
     #[account(mut)]
     pub upline_8: UncheckedAccount<'info>,
-    #[account(
-        init,
-        payer = wallet,
-        seeds = [b"batch", wallet.key().as_ref(), &user.next_batch_index.to_le_bytes()],
-        bump,
-        space = UnitBatch::SPACE
-    )]
-    pub batch: Box<Account<'info, UnitBatch>>,
     pub token_program: Program<'info, Token>,
-    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
@@ -737,8 +739,8 @@ fn update_activity_after_purchase(
         .lifetime_service_units
         .checked_add(units as u128)
         .ok_or(ProtocolError::ArithmeticOverflow)?;
-    user.next_batch_index = user
-        .next_batch_index
+    user.next_purchase_index = user
+        .next_purchase_index
         .checked_add(1)
         .ok_or(ProtocolError::ArithmeticOverflow)?;
 

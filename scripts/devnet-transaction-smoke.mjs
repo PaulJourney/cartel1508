@@ -114,14 +114,6 @@ const [buyerUser] = PublicKey.findProgramAddressSync(
   [Buffer.from("user"), payer.publicKey.toBuffer()],
   programId,
 );
-const [sponsorBatch0] = PublicKey.findProgramAddressSync(
-  [Buffer.from("batch"), sponsor.publicKey.toBuffer(), u64le(0n)],
-  programId,
-);
-const [buyerBatch0] = PublicKey.findProgramAddressSync(
-  [Buffer.from("batch"), payer.publicKey.toBuffer(), u64le(0n)],
-  programId,
-);
 
 const usdtMint = await createMint(connection, payer, payer.publicKey, null, 6);
 const usdcMint = await createMint(connection, payer, payer.publicKey, null, 6);
@@ -195,7 +187,6 @@ const sponsorPurchaseIx = await program.methods
     serviceTreasuryUsdc: treasuryUsdc.address,
     directReferrer: technicalRoot,
     ...rootEight,
-    batch: sponsorBatch0,
     tokenProgram: TOKEN_PROGRAM_ID,
     systemProgram: SystemProgram.programId,
   })
@@ -246,7 +237,6 @@ const buyerPurchaseIx = await program.methods
     upline6: technicalRoot,
     upline7: technicalRoot,
     upline8: technicalRoot,
-    batch: buyerBatch0,
     tokenProgram: TOKEN_PROGRAM_ID,
     systemProgram: SystemProgram.programId,
   })
@@ -264,8 +254,6 @@ invariant(vaultToken.amount === 70_042_000n, "combined vault liabilities mismatc
 
 const sponsorState = await program.account.userState.fetch(sponsorUser);
 const buyerState = await program.account.userState.fetch(buyerUser);
-const sponsorBatch = await program.account.unitBatch.fetch(sponsorBatch0);
-const buyerBatch = await program.account.unitBatch.fetch(buyerBatch0);
 const protocolStateBeforeClaims = await program.account.protocolState.fetch(protocol);
 
 invariant(asBigInt(sponsorState.pioneerId) === 1n, "sponsor must be Pioneer #1");
@@ -276,8 +264,6 @@ invariant(asBigInt(buyerState.selfAccruedUsdt) === 50n * TOKEN_SCALE, "buyer SEL
 invariant(asBigInt(buyerState.lifetimeServiceUnits) === 100n, "buyer must own 100 logical units");
 invariant(asBigInt(sponsorState.activeUntil) >= BigInt(await chainUnixTime(connection)), "sponsor must remain ACTIVE");
 invariant(asBigInt(buyerState.activeUntil) >= BigInt(await chainUnixTime(connection)), "100-unit purchase must leave buyer ACTIVE");
-invariant(asBigInt(sponsorBatch.firstUnitId) === 1n && asBigInt(sponsorBatch.lastUnitId) === 10n, "sponsor unit IDs must be 1..10");
-invariant(asBigInt(buyerBatch.firstUnitId) === 11n && asBigInt(buyerBatch.lastUnitId) === 110n, "buyer unit IDs must be 11..110");
 invariant(asBigInt(protocolStateBeforeClaims.nextUnitId) === 111n, "next global Unit ID must be 111");
 invariant(asBigInt(protocolStateBeforeClaims.lifetimeServiceFeesUsdt) === 5_500_000n, "5% service metric mismatch");
 invariant(asBigInt(protocolStateBeforeClaims.lifetimeUnallocatedUsdt) === 32_300_000n, "unallocated upper-network metric mismatch");
@@ -339,8 +325,6 @@ console.log(JSON.stringify({
   sponsorUser: sponsorUser.toBase58(),
   buyer: payer.publicKey.toBase58(),
   buyerUser: buyerUser.toBase58(),
-  sponsorBatch0: sponsorBatch0.toBase58(),
-  buyerBatch0: buyerBatch0.toBase58(),
   usdtMint: usdtMint.toBase58(),
   usdcMint: usdcMint.toBase58(),
   treasury: treasury.publicKey.toBase58(),

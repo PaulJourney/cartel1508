@@ -50,7 +50,7 @@ pub struct UserState {
     /// Start of the current partial (<10 units) qualification window.
     pub qualification_window_started_at: i64,
     pub lifetime_service_units: u128,
-    pub next_batch_index: u64,
+    pub next_purchase_index: u64,
     pub self_accrued_usdt: u64,
     pub self_accrued_usdc: u64,
     pub network_claimable_usdt: u64,
@@ -71,21 +71,6 @@ impl UserState {
     pub fn is_technical_root(&self) -> bool { self.wallet == Pubkey::default() }
 }
 
-#[account]
-pub struct UnitBatch {
-    pub bump: u8,
-    pub owner: Pubkey,
-    pub batch_index: u64,
-    pub mint: Pubkey,
-    pub units: u64,
-    pub first_unit_id: u128,
-    pub last_unit_id: u128,
-    pub purchased_at: i64,
-}
-
-impl UnitBatch {
-    pub const SPACE: usize = 8 + 1 + 32 + 8 + 32 + 8 + 16 + 16 + 8;
-}
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ActivityStatus { Active, Grace, Inactive }

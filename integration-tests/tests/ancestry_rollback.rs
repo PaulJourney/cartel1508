@@ -56,10 +56,6 @@ fn false_upline_cannot_move_tokens_create_units_or_leave_partial_rewards() {
     let (l2_pda, _) = Pubkey::find_program_address(&[b"user", l2.pubkey().as_ref()], &ID);
     let (l1_pda, _) = Pubkey::find_program_address(&[b"user", l1.pubkey().as_ref()], &ID);
     let (buyer_pda, _) = Pubkey::find_program_address(&[b"user", buyer.pubkey().as_ref()], &ID);
-    let (buyer_batch, _) = Pubkey::find_program_address(
-        &[b"batch", buyer.pubkey().as_ref(), &0u64.to_le_bytes()],
-        &ID,
-    );
 
     let registration_open_at = ctx.svm.get_sysvar::<Clock>().unix_timestamp;
     let initialize_ix = ctx
@@ -210,7 +206,6 @@ fn false_upline_cannot_move_tokens_create_units_or_leave_partial_rewards() {
             upline_6: technical_root,
             upline_7: technical_root,
             upline_8: technical_root,
-            batch: buyer_batch,
             token_program: spl_token::id(),
             system_program: anchor_lang::system_program::ID,
         })
@@ -242,7 +237,7 @@ fn false_upline_cannot_move_tokens_create_units_or_leave_partial_rewards() {
         buyer_after.lifetime_service_units,
         buyer_before.lifetime_service_units
     );
-    assert_eq!(buyer_after.next_batch_index, buyer_before.next_batch_index);
+    assert_eq!(buyer_after.next_purchase_index, buyer_before.next_purchase_index);
     assert_eq!(buyer_after.active_until, buyer_before.active_until);
     assert_eq!(
         l1_after.self_accrued_usdc,
