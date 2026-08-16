@@ -180,7 +180,6 @@ fn full_genealogy_pays_self_and_nine_uplines_but_never_tenth_upline() {
                 upline_6: uplines[5],
                 upline_7: uplines[6],
                 upline_8: uplines[7],
-                batch,
                 token_program: spl_token::id(),
             })
             .args(service_referral_protocol::instruction::PurchaseAndDistribute { units: 10 })
