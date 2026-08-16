@@ -891,10 +891,28 @@ fn mark_user_expired(
     Ok(())
 }
 
-/// Converts every whole-token-atom liability for an INACTIVE user into treasury-
-/// destined expired value for one mint. ACTIVE and GRACE users are untouched.
-/// Pioneer fractional dust remains in the checkpoint difference until it becomes a
-/// whole atomic unit; this preserves exact long-run conservation.
+/// True while an INACTIVE user is still inside a live partial qualification window.
+/// SELF and Pioneer value created during this window is provisional so splitting the
+/// same qualifying purchase into multiple transactions cannot change its economics.
+fn qualification_window_open(user: &UserState, now: i64) -> bool {
+    if user.qualification_progress_units == 0 || user.qualification_window_started_at <= 0 {
+        return false;
+    }
+    user.qualification_window_started_at
+        .checked_add(ACTIVE_SECONDS)
+        .map(|deadline| now <= deadline)
+        .unwrap_or(false)
+}
+
+/// Converts whole-token-atom liabilities for an INACTIVE user into treasury-
+/// destined expired value for one mint.
+///
+/// A live partial qualification window is a narrow exception for the user's own
+/// SELF and Pioneer buckets: those remain provisional until the user either reaches
+/// the 10-unit threshold or the qualification window expires. Network amounts are
+/// never protected by this exception and continue to follow IC-A fixed-depth expiry.
+/// This makes 10 units bought as 10x1 economically equivalent to 10 units bought
+/// in one transaction for the buyer's own SELF/Pioneer entitlement.
 fn expire_unclaimed_for_mint(
     user: &mut UserState,
     now: i64,
@@ -905,24 +923,42 @@ fn expire_unclaimed_for_mint(
         return Ok(0);
     }
 
-    let pioneer = pioneer_due(user, p, mint)?;
-    let (direct, network_claimable, network_pending) = if mint == p.usdt_mint {
+    let preserve_self_and_pioneer = qualification_window_open(user, now);
+    let pioneer = if preserve_self_and_pioneer {
+        0
+    } else {
+        pioneer_due(user, p, mint)?
+    };
+
+    let (self_reward, network_claimable, network_pending) = if mint == p.usdt_mint {
+        let self_reward = if preserve_self_and_pioneer {
+            0
+        } else {
+            let value = user.self_accrued_usdt;
+            user.self_accrued_usdt = 0;
+            value
+        };
         let values = (
-            user.self_accrued_usdt,
+            self_reward,
             user.network_claimable_usdt,
             user.network_pending_usdt,
         );
-        user.self_accrued_usdt = 0;
         user.network_claimable_usdt = 0;
         user.network_pending_usdt = 0;
         values
     } else if mint == p.usdc_mint {
+        let self_reward = if preserve_self_and_pioneer {
+            0
+        } else {
+            let value = user.self_accrued_usdc;
+            user.self_accrued_usdc = 0;
+            value
+        };
         let values = (
-            user.self_accrued_usdc,
+            self_reward,
             user.network_claimable_usdc,
             user.network_pending_usdc,
         );
-        user.self_accrued_usdc = 0;
         user.network_claimable_usdc = 0;
         user.network_pending_usdc = 0;
         values
@@ -930,7 +966,7 @@ fn expire_unclaimed_for_mint(
         return err!(ProtocolError::UnsupportedToken);
     };
 
-    let amount = direct
+    let amount = self_reward
         .checked_add(network_claimable)
         .ok_or(ProtocolError::ArithmeticOverflow)?
         .checked_add(network_pending)

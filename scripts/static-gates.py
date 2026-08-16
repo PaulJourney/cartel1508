@@ -44,6 +44,7 @@ checks = {
     'all inactive unclaimed flow is covered': all(x in expiry_helper for x in ['ActivityStatus::Inactive', 'self_accrued_usdt', 'self_accrued_usdc', 'network_claimable_usdt', 'network_claimable_usdc', 'network_pending_usdt', 'network_pending_usdc', 'pioneer_due(', 'checkpoint_pioneer_claimed(', 'mark_user_expired(']),
     'inactive unclaimed flow transfers from vault': 'expire_unclaimed_for_mint' in source and 'transfer_from_vault' in source,
     'activity partial window exists': 'qualification_window_started_at' in state and 'qualification_window_started_at' in activity_helper,
+    'partial qualification preserves SELF and Pioneer only': 'qualification_window_open' in source and 'preserve_self_and_pioneer' in expiry_helper and 'network_claimable_usdt = 0' in expiry_helper and 'network_pending_usdt = 0' in expiry_helper,
     'Pioneer high precision index exists': 'PIONEER_SCALE' in constants and '1_000_000_000_000_000_000' in constants,
     'Pioneer claim preserves fractional checkpoint': 'checkpoint_pioneer_claimed' in claim,
     'treasury accounting buckets separated': all(x in state for x in ['lifetime_service_fees_', 'lifetime_unallocated_', 'lifetime_expired_', 'lifetime_rounding_', 'lifetime_pioneer_unassigned_']),

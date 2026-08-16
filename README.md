@@ -65,6 +65,7 @@ The purchase updates the buyer's activity before the new SELF reward is evaluate
 - a buyer still in GRACE retains the SELF reward temporarily and must reactivate before claiming;
 - a buyer that remains INACTIVE after the purchase has the new SELF reward treasury-destined under IC-A;
 - stale unclaimed value is settled before late reactivation, so value whose grace period already ended cannot be rescued.
+- During a live partial qualification window, the buyer's SELF and Pioneer entitlement is provisional rather than immediately expired. Reaching 10 units inside the window makes `10×1` purchases economically equivalent to one 10-unit purchase for those own-user buckets; failure to qualify before the window closes sends the provisional value to treasury on settlement. Network-upline rewards remain governed by IC-A throughout.
 
 The same ACTIVE / GRACE / INACTIVE logic applies to fixed network-upline shares. Pioneer entitlement is also subject to final inactivity expiry.
 
