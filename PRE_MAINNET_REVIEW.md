@@ -1,64 +1,71 @@
-# Pre-mainnet irreversible decisions — V0.12
+# Pre-Mainnet Irreversible Decisions — Core-Only Protocol
 
-## Technical baseline completed
+Status: **NOT READY FOR MAINNET** until every blocking item below is closed.
 
-- Pinned Anchor/Solana core build passes.
-- Locked dependency CI passes for the referral core; isolated dependency resolution is checked for the Revenue Adapter and Revenue Qualification programs.
-- Rust and LiteSVM security/economic lifecycle tests pass.
-- Global Unit ID allocation is tested across wallets.
-- Deterministic property tests cover accounting conservation and Unit ID range invariants.
-- Anchor development SBF build passes for the referral core.
-- Previous production-equivalent referral devnet transaction smoke passed: initialize, Pioneer #1 registration, 10-unit purchase, separately funded qualified revenue, 50/43/2/5 accounting and ACTIVE claim.
-- The 2026-08-14 referral smoke conserved exactly 20 test tokens end-to-end: 5.002 to the test user, 14.998 to the test treasury and 0 remaining in the vault after claim.
-- Revenue Adapter compiles, unit-tests and builds as an SBF candidate while retaining fail-closed production identities.
-- Revenue Qualification compiles, unit-tests and builds as an SBF candidate while retaining fail-closed production identities.
-- The test-only Revenue Evidence fixture compiles for testing and is explicitly prevented from compiling with the `production` feature.
-- The hardened four-program LiteSVM chain proves `evidence -> qualification -> adapter -> referral` behavior end-to-end.
-- The full-chain test proves exact 50/43/2/5 conservation, canonical prefunding, beneficiary/evidence binding, replay rejection, mismatch rollback and atomic downstream accounting.
-- The Revenue Adapter still enforces verifier-PDA authorization: an ordinary wallet cannot substitute for the qualification verifier PDA.
-- A release-binding test derives the Adapter `RevenueAuthority` PDA and requires the core's frozen qualified-revenue source to match it exactly once final identities are introduced.
-- The executable pre-mainnet gate has been aligned to the four-program production architecture and remains intentionally fail-closed.
+## Business/economic decisions already frozen
 
-## Intentionally unresolved product boundary
+- Solana / Anchor implementation.
+- USDT and USDC only, each with 6 decimals.
+- 1 USDT/USDC = 1 logical unit.
+- A unit purchase is the sole production event that creates referral accounting.
+- Level 1 is the immutable direct sponsor and receives 50% direct only.
+- Levels 2–10 receive the 43% network pool: `15 / 9 / 6 / 4 / 2.5 / 2 / 1.5 / 1 / 2`.
+- Pioneer pool: 2%, first 100 real registrations.
+- Service/platform: 5%.
+- Activity threshold: 10 units; ACTIVE 7 days; GRACE 48 hours.
+- Claims are pull-based and require the claimant wallet signature and ACTIVE status.
+- Buyer pays gas for purchase; beneficiary pays gas only when claiming; receiving an accrual requires no beneficiary transaction.
+- Service treasury: `AepYo8xanmKuRiLVeYQuCTJoQr1nyKiTApoKwHMEg8fn`.
+- Mainnet USDT: `Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB`.
+- Mainnet USDC: `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`.
 
-`QUALIFIED_REVENUE_QUALIFICATION_SPEC.md` is currently marked `BLOCKED`.
+## Architecture already frozen
 
-This is deliberate. The repository must not invent which real service-revenue event qualifies, how beneficiary and amount are derived, how evidence is authenticated, how economic finality is established, or how refunds/reversals are treated. Those product/economic semantics must be concretely defined before a production Revenue Evidence source can exist.
+The intended production boundary is one Solana program:
 
-Service-unit/activity purchases remain explicitly excluded from qualified revenue and must never be routed into referral reward creation.
+`purchase_and_distribute -> vault/accounting -> claim`
 
-The current `integration-tests/fixtures/evidence_stub` is test infrastructure only. It demonstrates the security and atomicity of the downstream chain; it is not a production source of truth and is compile-blocked for production.
+The previous Evidence / Qualification / Revenue Adapter design is superseded and is not part of the mainnet release.
+
+## Engineering baseline already established
+
+- Core workspace is pinned to the reviewed Solana/Anchor toolchain.
+- Reference-model accounting checks enforce 50/43/2/5 conservation and the nine L2–L10 weights.
+- Static gates require the purchase-triggered production path, canonical token accounts, pull claims and the L10 traversal cap.
+- Core CI builds development and production artifacts from the locked dependency graph.
+- RustSec scan is scoped to the final core dependency graph.
+- Verifiable-build workflow is scoped to the final core artifact.
+- Dedicated LiteSVM testing covers purchase-triggered accounting and separate claimant-signed withdrawal.
+- Mainnet release manifest and executable gate have been reduced to one production artifact.
+
+These are engineering evidences only. They do not replace the independent audit of the final frozen commit.
 
 ## Blocking before controlled mainnet deployment
 
-1. Complete `QUALIFIED_REVENUE_QUALIFICATION_SPEC.md` with concrete product/economic semantics and set exactly one status marker to `QUALIFICATION_SPEC_STATUS: FINAL`.
-2. Implement the real production `programs/revenue_evidence` source from that FINAL specification, including its trust source, event identity, beneficiary/amount binding, evidence, funding provenance and economic-finality rules.
-3. Complete adversarial tests for the production evidence source against Revenue Qualification, Revenue Adapter and the referral core.
-4. Generate final offline Program ID keypairs for all four production programs: Revenue Evidence, Revenue Qualification, Revenue Adapter and Service Referral Protocol.
-5. Freeze the final Revenue Evidence Program ID and Revenue Adapter Program ID into Revenue Qualification.
-6. Freeze the final Revenue Qualification Program ID into the Revenue Adapter.
-7. Freeze the final Revenue Adapter Program ID into the referral core and derive/freeze the adapter's exact `[b"revenue-authority"]` PDA as `MAINNET_QUALIFIED_REVENUE_SOURCE`.
-8. Freeze the exact registration opening UTC timestamp.
-9. Obtain an independent third-party audit of the complete `evidence -> qualification -> adapter -> referral` boundary and dispose of all accepted findings.
-10. Produce final locked/verifiable builds of all four programs from the exact audited source commit; archive all four artifact hashes and verified-build evidence.
-11. Complete `release/mainnet-release.json`, including the FINAL qualification-spec hash and all four verified-build evidences.
-12. `python3 scripts/pre-mainnet-gate.py` must return exactly `READY FOR CONTROLLED MAINNET DEPLOYMENT`.
+1. Remove all remaining dead qualified-revenue instruction/state/configuration from the core itself so the audited interface exposes only the intended production model.
+2. Migrate or replace historical tests that depend on the superseded instruction surface.
+3. Make the complete final core CI green after that cleanup.
+4. Run a devnet smoke using the final instruction surface: initialize, register genealogy, purchase, activity transition, 50/43/2/5 accounting and pull claim.
+5. Generate the final Program ID keypair offline. The secret keypair must never enter GitHub or this repository.
+6. Replace the development `declare_id!` and add matching `[programs.mainnet]` configuration.
+7. Freeze a future registration-opening UTC timestamp.
+8. Produce the exact final verifiable `.so` and SHA-256 from the audited source commit.
+9. Obtain an independent third-party audit of the final core plus the client transaction builder, and disposition every finding.
+10. Complete `release/mainnet-release.json` with the exact commit SHA, Program ID, registration timestamp, treasury/mints, `.so` hash, audit-report hash and verified-build evidence.
+11. `python3 scripts/pre-mainnet-gate.py` must exit successfully with no blockers.
 
-Until all twelve conditions hold, mainnet deployment remains intentionally blocked.
+Until all eleven conditions hold, deployment remains intentionally fail-closed.
 
 ## Blocking before permanent immutability
 
-- Deploy Revenue Evidence, Revenue Qualification, Revenue Adapter and referral core with temporary upgrade authority retained during the controlled verification window.
-- Initialize only after all required executable Program IDs and frozen identities are present and mutually consistent.
-- Verify deployed bytecode for all four programs against the exact audited artifact hashes.
-- Run a limited mainnet smoke test of the complete `evidence -> qualification -> adapter -> referral` flow using the frozen production configuration.
-- Stop immediately on any Program ID, PDA, bytecode, state, token balance, evidence binding or accounting mismatch.
-- Only after the complete chain passes may upgrade authority be removed permanently from every production program.
+- Deploy the final core with temporary upgrade authority retained.
+- Verify the deployed Program ID and bytecode against the exact audited `.so` hash.
+- Initialize with only the frozen treasury, canonical mints and frozen registration opening time.
+- Execute a deliberately small mainnet smoke transaction set.
+- Verify unit IDs, genealogy, stablecoin balances, vault liabilities, service allocation, Pioneer accounting and pull claim.
+- Stop immediately on any bytecode, PDA, ancestry, token-balance or accounting mismatch.
+- Only after the smoke is successful and independently reviewed may the upgrade authority be permanently removed.
 
-## Explicit trust boundary
+## Key custody rule
 
-The referral core does not decide whether revenue is qualified. The Revenue Adapter does not decide whether revenue is qualified. Revenue Qualification does not invent an economic event; it validates canonical evidence emitted by the one frozen production Revenue Evidence program and forwards it through the hardened adapter boundary.
-
-The production Revenue Evidence program must implement only the FINAL, independently reviewed qualification specification. Its trust source and any external system capable of causing evidence issuance are part of the audited security boundary.
-
-The Adapter's role is limited to enforcing the Revenue Qualification verifier-PDA authorization, canonical prefunded RevenueAuthority token accounts, immutable event receipts and atomic CPI into the referral core.
+GitHub contains public source and public Program IDs only. Final deployment/update keypairs remain offline under the custody runbook. No seed phrase, secret key array, JSON keypair or private key may be pasted into issues, PRs, CI variables, chat transcripts or repository files.
