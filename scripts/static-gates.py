@@ -14,6 +14,7 @@ def section(start_marker: str, end_marker: str) -> str:
 final_purchase = section('    pub fn purchase_and_distribute', '    pub fn settle_expired')
 claim = section('    pub fn claim', '}\n\n#[derive(Accounts)]')
 activity_helper = section('fn update_activity_after_purchase', 'fn add_direct')
+expiry_helper = section('fn expire_unclaimed_for_mint', '#[allow(clippy::too_many_arguments)]')
 production_accounts = section('pub struct PurchaseAndDistribute', 'pub struct SettleExpired')
 initialize = section('    pub fn initialize', '    pub fn register')
 
@@ -28,6 +29,7 @@ checks = {
     'legacy adapter/source constants removed': 'MAINNET_REVENUE_ADAPTER_PROGRAM' not in constants and 'MAINNET_QUALIFIED_REVENUE_SOURCE' not in constants,
     'final purchase is the sole reward event': all(x in final_purchase for x in ['split_purchase_amount(payment)', 'add_direct(', 'add_network_claimable(', 'accrue_pioneer(']),
     'final purchase sends buyer funds to canonical vault': 'to: payment_destination' in final_purchase and 'validate_vault_token_for_mint' in final_purchase,
+    'purchase expires stale buyer value before reactivation': final_purchase.index('settle_expired_all(') < final_purchase.index('update_activity_after_purchase('),
     'sponsor is direct level one only': 'direct_referrer.wallet == ctx.accounts.user.referrer' in final_purchase and 'add_direct(&mut ctx.accounts.direct_referrer' in final_purchase,
     'network starts at genealogical level two': 'let mut expected_wallet = ctx.accounts.direct_referrer.referrer' in final_purchase,
     'production network stops at level ten': 'for i in 0..9' in final_purchase and all(f'upline_{i}' in production_accounts for i in range(1, 10)) and 'upline_10' not in production_accounts,
@@ -39,7 +41,8 @@ checks = {
     'claim destination ATA must be canonical': 'destination.key() == canonical_ata(wallet, mint)' in source,
     'buyer and sponsor PDAs are validated': 'validate_user_pda(&ctx.accounts.user)' in final_purchase and 'validate_user_pda(&ctx.accounts.direct_referrer)' in final_purchase,
     'permissionless expired settlement exists': 'pub fn settle_expired' in source and 'pub settler: Signer' in source,
-    'expired flow transfers from vault': 'expire_pending_for_mint' in source and 'transfer_from_vault' in source,
+    'all inactive unclaimed flow is covered': all(x in expiry_helper for x in ['ActivityStatus::Inactive', 'direct_accrued_usdt', 'direct_accrued_usdc', 'network_claimable_usdt', 'network_claimable_usdc', 'network_pending_usdt', 'network_pending_usdc', 'pioneer_due(', 'checkpoint_pioneer_claimed(', 'mark_user_expired(']),
+    'inactive unclaimed flow transfers from vault': 'expire_unclaimed_for_mint' in source and 'transfer_from_vault' in source,
     'activity partial window exists': 'qualification_window_started_at' in state and 'qualification_window_started_at' in activity_helper,
     'Pioneer high precision index exists': 'PIONEER_SCALE' in constants and '1_000_000_000_000_000_000' in constants,
     'Pioneer claim preserves fractional checkpoint': 'checkpoint_pioneer_claimed' in claim,
