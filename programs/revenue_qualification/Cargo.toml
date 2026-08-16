@@ -22,3 +22,6 @@ production = []
 anchor-lang = "=1.1.2"
 anchor-spl = { version = "=1.1.2", features = ["token", "associated_token"] }
 revenue_adapter = { path = "../revenue_adapter", features = ["cpi"] }
+
+[workspace]
+resolver = "2"
