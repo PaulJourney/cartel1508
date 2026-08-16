@@ -1,0 +1,70 @@
+name: qualified-revenue-final-integration
+
+on:
+  push:
+    branches:
+      - agent/qualified-revenue-final-integration
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  qualification-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: solana-foundation/github-actions/setup-all@v0.2.15
+        with:
+          solana_version: '3.1.10'
+          anchor_version: '1.1.2'
+          node_version: '24'
+      - run: cargo-build-sbf --install-only
+      - name: Core regression checks
+        run: |
+          node tests/reference-model.mjs
+          python3 scripts/static-gates.py
+          cargo test --locked --workspace
+          cargo test --locked --manifest-path integration-tests/Cargo.toml --all-targets -- --nocapture
+      - name: Hardened Revenue Adapter checks
+        working-directory: programs/revenue_adapter
+        run: |
+          cargo generate-lockfile
+          cargo check --locked
+          cargo test --locked
+      - name: Qualification gateway checks
+        working-directory: programs/revenue_qualification
+        run: |
+          cargo generate-lockfile
+          cargo check --locked
+          cargo test --locked
+          cargo build-sbf -- --locked
+      - name: Test evidence fixture checks
+        working-directory: integration-tests/fixtures/evidence_stub
+        run: |
+          cargo generate-lockfile
+          cargo check --locked
+          cargo build-sbf -- --locked
+          set +e
+          output="$(cargo check --locked --features production 2>&1)"
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          test "$status" -ne 0
+          grep -q 'TEST-ONLY fixture' <<<"$output"
+      - name: Production paths remain fail closed
+        run: |
+          set +e
+          adapter_out="$(cd programs/revenue_adapter && cargo check --locked --features production 2>&1)"
+          adapter_status=$?
+          qualification_out="$(cd programs/revenue_qualification && cargo check --locked --features production 2>&1)"
+          qualification_status=$?
+          set -e
+          printf '%s\n' "$adapter_out"
+          printf '%s\n' "$qualification_out"
+          test "$adapter_status" -eq 0
+          test "$qualification_status" -eq 0
+          grep -q 'MAINNET_VERIFIER_PROGRAM' programs/revenue_adapter/src/lib.rs
+          grep -q '11111111111111111111111111111111' programs/revenue_adapter/src/lib.rs
+          grep -q 'MAINNET_EVIDENCE_PROGRAM' programs/revenue_qualification/src/lib.rs
+          grep -q '11111111111111111111111111111111' programs/revenue_qualification/src/lib.rs
