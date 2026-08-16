@@ -1,0 +1,34 @@
+name: apply-pioneer-purchase-positions
+on:
+  push:
+    branches:
+      - agent/qualified-revenue-final-integration
+    paths:
+      - scripts/migrate-pioneer-purchase-positions.py
+      - .github/workflows/apply-pioneer-purchase-positions.yml
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/qualified-revenue-final-integration
+          fetch-depth: 0
+      - name: Apply migration
+        run: python3 scripts/migrate-pioneer-purchase-positions.py
+      - name: Validate patch
+        run: |
+          git diff --check
+          grep -R "pioneer_id\|pioneer_count" programs integration-tests scripts README.md && exit 1 || true
+          grep -q "PIONEER_POSITION_PURCHASE_UNITS: u64 = 1_000" programs/service_referral_protocol/src/constants.rs
+          grep -q "assign_pioneer_positions_after_purchase" programs/service_referral_protocol/src/lib.rs
+          grep -q "pioneer_positions_assigned, 100" integration-tests/tests/pioneer_positions.rs
+      - name: Commit migration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "make Pioneer pool purchase-position based"
+          git push origin HEAD:agent/qualified-revenue-final-integration
