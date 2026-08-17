@@ -123,6 +123,7 @@ jobs:
           test -s target/deploy/service_referral_protocol.so
           test -s target/idl/service_referral_protocol.json
           node --check scripts/devnet-comprehensive-validation.mjs
+          node --check scripts/devnet-security-adversarial.mjs
           node --check scripts/devnet-rpc-guard.mjs
           sha256sum target/deploy/service_referral_protocol.so | tee /tmp/devnet-runtime-so.sha256
       - name: Deploy to devnet
@@ -141,6 +142,14 @@ jobs:
         run: |
           npm run devnet:pre-mainnet | tee /tmp/devnet-pre-mainnet-validation.txt
           grep -q 'DEVNET PRE-MAINNET COMPREHENSIVE VALIDATION: PASS' /tmp/devnet-pre-mainnet-validation.txt
+      - name: Execute runtime security adversarial validation
+        env:
+          ANCHOR_PROVIDER_URL: https://api.devnet.solana.com
+          ANCHOR_WALLET: ~/.config/solana/id.json
+          PROTOCOL_IDL: target/idl/service_referral_protocol.json
+        run: |
+          npm run devnet:security | tee /tmp/devnet-security-adversarial.txt
+          grep -q 'DEVNET SECURITY ADVERSARIAL VALIDATION: PASS' /tmp/devnet-security-adversarial.txt
       - name: Record final deployer balance
         if: always()
         run: solana balance --url devnet | tee /tmp/devnet-end-balance.txt || true
@@ -161,4 +170,5 @@ jobs:
             /tmp/devnet-start-balance.txt
             /tmp/devnet-end-balance.txt
             /tmp/devnet-pre-mainnet-validation.txt
+            /tmp/devnet-security-adversarial.txt
           if-no-files-found: warn
