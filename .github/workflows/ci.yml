@@ -16,6 +16,8 @@ jobs:
       - run: cargo-build-sbf --install-only
       - name: Reference economics
         run: node tests/reference-model.mjs
+      - name: Rank/badge model
+        run: node tests/rank-model.mjs
       - name: Static security/economic gates
         run: python3 scripts/static-gates.py
       - name: Prove pre-mainnet gate fails closed before final freeze
