@@ -28,6 +28,7 @@ jobs:
         run: |
           node --check scripts/devnet-transaction-smoke.mjs
           node --check scripts/devnet-comprehensive-validation.mjs
+          node --check scripts/devnet-security-adversarial.mjs
           node --check scripts/devnet-rpc-guard.mjs
       - name: Static security/economic gates
         run: python3 scripts/static-gates.py
