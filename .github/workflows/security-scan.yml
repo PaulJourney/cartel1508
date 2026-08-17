@@ -1,15 +1,10 @@
 name: rustsec-security-scan
-on:
-  pull_request:
-    paths:
-      - '.github/workflows/security-scan.yml'
-      - 'Cargo.lock'
-      - 'Cargo.toml'
-      - 'programs/service_referral_protocol/Cargo.toml'
+on: [pull_request]
 permissions:
   contents: read
 
-# Exact-head checkout is intentional: audit evidence must bind to the PR source SHA.
+# Exact-head checkout is intentional: audit evidence must bind to every PR source SHA,
+# including documentation-only final marker commits used for release evidence.
 jobs:
   cargo-audit:
     runs-on: ubuntu-latest
