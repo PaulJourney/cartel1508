@@ -67,6 +67,7 @@ jobs:
           test -s target/deploy/service_referral_protocol.so
           test -s target/idl/service_referral_protocol.json
           node --check scripts/devnet-comprehensive-validation.mjs
+          node --check scripts/devnet-security-adversarial.mjs
           node --check scripts/devnet-rpc-guard.mjs
       - name: Deploy to isolated local validator
         run: |
@@ -84,6 +85,14 @@ jobs:
         run: |
           npm run devnet:pre-mainnet | tee /tmp/local-pre-mainnet-validation.txt
           grep -q 'DEVNET PRE-MAINNET COMPREHENSIVE VALIDATION: PASS' /tmp/local-pre-mainnet-validation.txt
+      - name: Execute runtime security adversarial transactions locally
+        env:
+          ANCHOR_PROVIDER_URL: http://127.0.0.1:8899
+          ANCHOR_WALLET: ~/.config/solana/id.json
+          PROTOCOL_IDL: target/idl/service_referral_protocol.json
+        run: |
+          npm run devnet:security | tee /tmp/local-security-adversarial.txt
+          grep -q 'DEVNET SECURITY ADVERSARIAL VALIDATION: PASS' /tmp/local-security-adversarial.txt
       - name: Record local final state
         if: always()
         run: |
@@ -102,5 +111,6 @@ jobs:
             /tmp/local-deploy.txt
             /tmp/local-program-show.txt
             /tmp/local-pre-mainnet-validation.txt
+            /tmp/local-security-adversarial.txt
             /tmp/local-validator-tail.txt
           if-no-files-found: warn
