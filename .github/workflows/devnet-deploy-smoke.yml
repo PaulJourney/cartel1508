@@ -16,6 +16,12 @@ jobs:
       DEVNET_DEPLOYER_KEYPAIR_JSON: ${{ secrets.DEVNET_DEPLOYER_KEYPAIR_JSON }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Verify exact source head
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          printf '%s\n' "$GITHUB_SHA" | tee /tmp/devnet-source-head.txt
       - uses: solana-foundation/github-actions/setup-all@v0.2.15
         with:
           solana_version: '3.1.10'
@@ -59,6 +65,12 @@ jobs:
                   raise SystemExit(f'expected development Program ID missing in {filename}')
               p.write_text(text.replace(old_id, new_id))
           PY
+
+          git diff --check
+          git diff --name-only | sort | tee /tmp/devnet-runtime-changed-files.txt
+          printf '%s\n' 'Anchor.toml' 'programs/service_referral_protocol/src/lib.rs' | sort > /tmp/devnet-runtime-expected-files.txt
+          diff -u /tmp/devnet-runtime-expected-files.txt /tmp/devnet-runtime-changed-files.txt
+          git diff -- Anchor.toml programs/service_referral_protocol/src/lib.rs > /tmp/devnet-runtime-program-id.diff
       - name: Publish public funding address immediately
         uses: actions/upload-artifact@v4
         with:
@@ -111,6 +123,8 @@ jobs:
           test -s target/deploy/service_referral_protocol.so
           test -s target/idl/service_referral_protocol.json
           node --check scripts/devnet-comprehensive-validation.mjs
+          node --check scripts/devnet-rpc-guard.mjs
+          sha256sum target/deploy/service_referral_protocol.so | tee /tmp/devnet-runtime-so.sha256
       - name: Deploy to devnet
         run: |
           solana program deploy target/deploy/service_referral_protocol.so \
@@ -136,6 +150,10 @@ jobs:
         with:
           name: devnet-pre-mainnet-comprehensive-evidence
           path: |
+            /tmp/devnet-source-head.txt
+            /tmp/devnet-runtime-changed-files.txt
+            /tmp/devnet-runtime-program-id.diff
+            /tmp/devnet-runtime-so.sha256
             /tmp/devnet-program-id.txt
             /tmp/devnet-deployer-pubkey.txt
             /tmp/devnet-deploy.txt
