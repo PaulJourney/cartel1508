@@ -8,6 +8,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact source head
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
       - uses: solana-foundation/github-actions/setup-all@v0.2.15
         with:
           solana_version: '3.1.10'
@@ -22,6 +28,7 @@ jobs:
         run: |
           node --check scripts/devnet-transaction-smoke.mjs
           node --check scripts/devnet-comprehensive-validation.mjs
+          node --check scripts/devnet-rpc-guard.mjs
       - name: Static security/economic gates
         run: python3 scripts/static-gates.py
       - name: Prove pre-mainnet gate fails closed before final freeze
