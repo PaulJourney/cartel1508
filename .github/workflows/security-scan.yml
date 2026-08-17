@@ -9,6 +9,7 @@ on:
 permissions:
   contents: read
 
+# Exact-head checkout is intentional: audit evidence must bind to the PR source SHA.
 jobs:
   cargo-audit:
     runs-on: ubuntu-latest
