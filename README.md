@@ -1,108 +1,120 @@
 # Service Referral Protocol — Solana V0.16
 
-Public development repository for an ownerless Solana/Anchor protocol foundation.
+Public development repository for an ownerless Solana/Anchor referral protocol foundation.
 
 ## Frozen economic model
 
 - Solana + Anchor/Rust.
-- USDT and USDC are separate accounting rails.
-- **1 USDT/USDC = 1 globally unique logical unit.** Users may purchase any number of units, subject only to SPL-token numeric/transaction limits.
-- Every unit purchase is the sole production economic event that funds and creates referral accounting.
+- USDT and USDC are separate six-decimal accounting rails.
+- **1 USDT/USDC = 1 globally unique logical unit.**
+- Buyer-signed `purchase_and_distribute` is the sole production economic event.
 - Referral relationships are immutable after registration.
-- Every purchase treats the **buyer as SELF**, the first economic beneficiary, receiving the **50% SELF reward**.
-- The buyer's immutable direct sponsor is the **first network upline** and receives the first 43%-pool slot: **15%**.
-- Eight additional ancestors complete a total of **9 network uplines**.
-- There is no separate self-reentry genealogy position: repeated purchases are additional units of the same user, and SELF is already economically represented by the 50% bucket on every purchase.
-- Activity threshold: 10 units; ACTIVE 7 days; GRACE 48 hours.
-- ACTIVE users may claim accrued rewards.
-- During GRACE, unclaimed value is temporarily preserved; reactivation within GRACE preserves/vests it.
-- **IC-A is frozen:** once INACTIVE, that user's scheduled/unclaimed SELF, network and Pioneer value becomes permanently treasury-destined. Higher uplines keep only their own fixed percentages; there is no dynamic compression.
-- Pioneer positions are **purchase-earned**, not registration-earned; registration alone receives zero positions.
-- Claims are pull-based: users sign the claim and pay their own SOL transaction fee.
+- The buyer is **SELF** and receives **50%** of every purchase.
+- The immutable direct sponsor is U1 and receives the first fixed network share.
+- The network contains exactly **9 uplines** total.
+- No separate self-reentry genealogy position exists.
+- ACTIVE lasts 7 days; GRACE lasts 48 hours.
+- Claims are pull-based and require the beneficiary to be ACTIVE.
+- **IC-A is frozen:** once INACTIVE, unclaimed SELF/network/Pioneer value is permanently treasury-destined. There is no dynamic compression.
 
 ## Frozen allocation
 
-For each purchase amount:
+For every purchase:
 
 - **SELF / buyer: 50%**
 - **9 network uplines: 43%**
 - **Pioneer pool: 2%**
 - **Service/platform: 5%**
 
-The nine network-upline weights are:
+The nine fixed network weights are:
 
-- Upline 1 — direct sponsor: 15%
-- Upline 2: 9%
-- Upline 3: 6%
-- Upline 4: 4%
-- Upline 5: 2.5%
-- Upline 6: 2%
-- Upline 7: 1.5%
-- Upline 8: 1%
-- Upline 9: 2%
+- U1 — direct sponsor: 15%
+- U2: 9%
+- U3: 6%
+- U4: 4%
+- U5: 2.5%
+- U6: 2%
+- U7: 1.5%
+- U8: 1%
+- U9: 2%
 
-The network weights sum to exactly 43%, so the complete allocation is exactly **50 + 43 + 2 + 5 = 100%** before deterministic integer-rounding handling.
+Total: **50 + 43 + 2 + 5 = 100%**, subject only to deterministic integer accounting.
 
-A useful commercial representation is **10 economic levels including SELF**. Internally and in audit documentation the safer terminology is **SELF + 9 uplines**, which avoids confusing the buyer with the sponsor. Pioneer positions are a separate global pool and are not genealogy levels.
+A commercial representation may call this **10 economic levels including SELF**. Internally and for audit, use **SELF + 9 uplines**.
 
 ### Example — 100 USDC purchase
 
-If Mario buys 100 USDC of units and is ACTIVE after the purchase:
+Assume Mario buys 100 units and, independently, each relevant upline is ACTIVE/GRACE and has unlocked enough weekly personal depth for its scheduled level:
 
 - Mario / SELF: 50 USDC
-- Mario's sponsor: 15 USDC
-- next uplines: 9, 6, 4, 2.5, 2, 1.5, 1 and 2 USDC
-- Pioneer pool: 2 USDC, split across Pioneer positions that already existed before this purchase; shares belonging to unassigned positions go to treasury
+- U1: 15 USDC
+- U2–U9: 9, 6, 4, 2.5, 2, 1.5, 1 and 2 USDC
+- Pioneer pool: 2 USDC to positions that existed before this purchase; unassigned Pioneer slot shares go to Treasury
 - service: 5 USDC
 
-If any specific upline is INACTIVE, **IC-A** sends only that upline's scheduled share to treasury; the next active ancestor does not inherit that percentage.
+If an upline is INACTIVE, its own scheduled share is treasury-destined. If an ACTIVE/GRACE upline exists but has not unlocked that level, the fixed share is unallocated to Treasury. In neither case is the percentage compressed upward.
+
+## Progressive weekly ACTIVE requirement
+
+A wallet advances its qualification requirement only when it successfully starts a new ACTIVE week. Calendar inactivity alone never advances the ladder:
+
+- ACTIVE weeks 1–2: **10 units**
+- weeks 3–4: **20**
+- weeks 5–6: **30**
+- weeks 7–8: **40**
+- week 9 onward: **50**, permanently capped
+
+During an already ACTIVE week, additional purchases increase only `current_week_units` and monetization depth; they never prequalify the next week.
+
+During GRACE/INACTIVE, purchases accumulate toward the next requirement inside one live seven-day qualification window. Stale partial progress resets. During a live INACTIVE partial-qualification window, **only buyer SELF is provisionally preserved** for batching equivalence. Network and Pioneer receive no partial-window exception.
+
+## Weekly network depth
+
+Each upline's own personal units in its current ACTIVE week determine how many fixed network levels that wallet may monetize:
+
+- 10 → U1–U3
+- 25 → U1–U4
+- 50 → U1–U5
+- 100 → U1–U6
+- 200 → U1–U7
+- 350 → U1–U8
+- 500+ → U1–U9
+
+Depth unlocking is prospective only. Previously locked levels are never recovered retroactively. GRACE retains the depth of the just-finished ACTIVE week while preserved rewards remain pending.
 
 ## Pioneer 2% pool — purchase-earned positions
 
-- The pool has an absolute maximum of **100 positions**.
-- Registration alone earns **zero** positions.
-- A single purchase earns `floor(units / 1000)` candidate positions.
-- Purchases below 1,000 never accumulate across transactions: `500 + 500` in two purchases creates zero positions.
-- One wallet may own multiple positions.
-- Assignment is `min(candidate_positions, 100 - positions_already_assigned)`.
+- Absolute global cap: **100 positions**.
+- Registration earns **zero** positions.
+- One individual purchase creates `floor(units / 1000)` candidate positions.
+- Purchases never accumulate toward the threshold: separate `500 + 500` purchases create zero positions.
+- One wallet may own multiple or all positions.
+- Assignment is capped by remaining global capacity.
 - At 98/100, a 3,000-unit purchase receives exactly 2 positions.
-- At 100/100 the pool is permanently saturated and no later purchase can create another position, regardless of size.
-- **Rule B:** positions created by a purchase begin earning only from the next global purchase; they never earn from the transaction that created them.
-- Network/SELF/Pioneer earnings, claims and wallet balances never create Pioneer positions; only the gross units of the individual buyer-signed purchase do.
-- Each position is one equal share of the fixed 2%/100 pool. Unassigned shares go to treasury and are never redistributed among existing Pioneer holders.
-- Weighted checkpoints allow the same wallet to acquire positions at different times without receiving retroactive Pioneer value.
-
-## Activity and expiry
-
-The purchase updates the buyer's activity before the new SELF reward is evaluated:
-
-- a purchase that brings the buyer to the 10-unit qualification threshold makes the buyer ACTIVE and allows the new 50% SELF reward to remain claimable;
-- a buyer still in GRACE retains the SELF reward temporarily and must reactivate before claiming;
-- a buyer that remains INACTIVE after the purchase has the new SELF reward treasury-destined under IC-A;
-- stale unclaimed value is settled before late reactivation, so value whose grace period already ended cannot be rescued;
-- during a live partial qualification window, the buyer's SELF and any already-owned Pioneer entitlement are provisional rather than immediately expired. Reaching 10 units inside the window makes `10×1` purchases economically equivalent to one 10-unit purchase for those own-user buckets; failure to qualify before the window closes sends the provisional value to treasury on settlement. Network-upline rewards remain governed by IC-A throughout;
-- activity-unit accumulation does **not** imply Pioneer accumulation: Pioneer positions still require a single purchase of at least 1,000 units.
-
-The same ACTIVE / GRACE / INACTIVE logic applies to fixed network-upline shares. Pioneer entitlement is also subject to final inactivity expiry.
+- At 100/100, every later purchase creates zero new positions.
+- Positions are permanent and never recycled.
+- **Rule B:** positions created by a purchase begin earning from the next global purchase, never from the purchase that created them.
+- Each position is one equal virtual share of the fixed 2%/100 pool.
+- Unassigned slot shares go to Treasury and are not redistributed among existing Pioneers.
+- Weighted high-precision checkpoints prevent retroactive entitlement when a wallet adds positions later.
+- Pioneer positions remain owned through inactivity, but unclaimed Pioneer due expires once the wallet becomes INACTIVE. Reactivation resumes participation prospectively only.
 
 ## Gas / transaction-fee model
 
-The protocol does not send one transaction to every reward recipient.
-
-- Registration: the registering wallet signs and pays SOL transaction/account-creation costs.
-- Unit purchase: the buyer signs once and pays the Solana transaction fee. The same transaction transfers USDT/USDC into the protocol vault, updates activity and performs 50/43/2/5 accounting. It creates no per-purchase rent account.
-- Reward accrual: sponsor/uplines/Pioneers do not sign and pay no gas merely because accounting credit is created.
-- Claim: an ACTIVE beneficiary signs a separate claim transaction and pays its own SOL fee. Multiple accruals can be accumulated and withdrawn together.
-- Expiration settlement: treasury-destined value can be physically settled permissionlessly; whoever submits that transaction pays its SOL fee. No permanent platform keeper is required.
-- Purchase history: global logical Unit IDs, purchase index, mint, unit count, Pioneer positions added/total and timestamp are emitted in the `UnitsPurchased` event. No `UnitBatch` PDA is created, so repeated/unlimited purchases do not accumulate per-purchase account rent.
+- Registration: registering wallet signs and pays SOL account/transaction costs.
+- Purchase: buyer signs once and pays the Solana transaction fee; there is no per-purchase rent PDA.
+- Reward accrual: beneficiaries do not sign merely to receive accounting credit.
+- Claim: ACTIVE beneficiary signs and pays its own SOL fee.
+- Expiry settlement: permissionless; the submitter pays the transaction fee.
+- Purchase history is event-based through globally monotonic Unit IDs and purchase indices.
 
 ## Final production surface
 
-The main economic path is:
+Economic path:
 
-`buyer -> purchase_and_distribute -> canonical stablecoin vault -> activity + SELF/network/Pioneer/service accounting -> optional Pioneer-position assignment -> later claim or expiry settlement`
+`buyer -> purchase_and_distribute -> canonical stablecoin vault -> SELF/network/Pioneer/service accounting -> later claim or expiry settlement`
 
-The on-chain instruction surface is limited to:
+On-chain instructions:
 
 - `initialize`
 - `register`
@@ -110,43 +122,71 @@ The on-chain instruction surface is limited to:
 - `settle_expired`
 - `claim`
 
-The previous qualified-revenue, Evidence, Qualification and Revenue Adapter programs/instructions have been removed from the final production surface.
+The previous qualified-revenue / Revenue Adapter / Evidence / Qualification production architecture has been retired. Historical migration tooling is outside the production and audit boundary.
 
-## Mainnet identities under review
+## Security properties
 
-- Service treasury: `AepYo8xanmKuRiLVeYQuCTJoQr1nyKiTApoKwHMEg8fn`
+The program independently validates the transaction builder's inputs:
+
+- user PDA is bound to the signer wallet;
+- immutable sponsor/ancestry is reconstructed PDA-by-PDA;
+- source token account must be owned by the buyer;
+- mint must be a supported protocol mint;
+- vault accounts must be canonical SPL Token ATAs owned by the vault-authority PDA;
+- Treasury accounts must be canonical ATAs of the frozen service Treasury;
+- claim destination must be the claimant's canonical ATA;
+- economic arithmetic uses checked operations;
+- failed transactions roll back all preceding state/token mutations atomically.
+
+Runtime adversarial coverage includes false ancestry, wrong vault, unsupported mint, wrong source authority, Treasury substitution, registration spoofing, claim hijacking, non-canonical claim destination, double-claim/replay and a failed payment CPI after expiry settlement has already begun.
+
+## Validation layers
+
+Before Mainnet, the candidate is exercised in complementary environments:
+
+1. deterministic reference economics and rank models;
+2. Rust unit/property tests;
+3. LiteSVM integration/adversarial tests with clock warping for ACTIVE/GRACE/INACTIVE boundaries;
+4. isolated `solana-test-validator` comprehensive transactions with real SPL accounts, PDAs, signatures and deployment;
+5. final public Solana Devnet comprehensive + security-adversarial run;
+6. reproducible/verifiable production build with byte/hash comparison;
+7. final production-runtime validation after Program ID/timestamp freeze;
+8. independent external audit of the exact frozen release candidate.
+
+No single layer is treated as proof by itself.
+
+## Mainnet identities
+
+- Service Treasury: `AepYo8xanmKuRiLVeYQuCTJoQr1nyKiTApoKwHMEg8fn`
 - USDT: `Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB`
 - USDC: `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`
 
-The currently declared Program ID is still a development identity. The final Program ID keypair must be generated offline; only its public key belongs in source control.
+The currently declared Program ID remains a development identity. The final Mainnet Program ID keypair must be generated offline; only its public key belongs in source control.
 
-## Mainnet gate
+## Mainnet release gate
 
-Do **not** make the program immutable on mainnet until all of these pass. CI evidence must be generated on the exact current release-candidate commit; a workflow that requires approval or never creates jobs is not considered passing evidence.
+Do **not** deploy/initialize or make the program immutable on Mainnet until all required gates are green on the appropriate frozen source:
 
-1. Final core production build on the pinned toolchain.
-2. Reference, Rust, LiteSVM integration and adversarial tests all green on the exact release commit.
-3. Devnet smoke using the exact final instruction surface, SELF + 9-upline economics and purchase-earned Pioneer rules.
-4. Independent audit of the exact final core and client transaction construction.
-5. Public reproducible/verifiable build and SHA-256 of the final `.so`.
-6. Final Program ID generated offline and frozen consistently in source/configuration.
-7. Future registration-opening UTC frozen.
-8. `release/mainnet-release.json` completed and the executable pre-mainnet gate fully green.
-9. Controlled mainnet deployment and deliberately small smoke while upgrade authority is retained.
-10. Deployed bytecode verified against the audited artifact.
-11. Only then permanently remove program upgrade authority.
+1. final economics/activity/depth/Pioneer specification frozen;
+2. exact-head protocol CI and RustSec green;
+3. comprehensive isolated-runtime validation green;
+4. final public Devnet comprehensive + security-adversarial evidence green;
+5. final Mainnet Program ID generated offline and public key frozen in source/config;
+6. future registration-open UTC timestamp frozen;
+7. final production `.so` built reproducibly and SHA-256 verified;
+8. final production-runtime validation bound to the final release SHA;
+9. independent audit completed and all findings dispositioned;
+10. `release/mainnet-release.json` complete and `scripts/pre-mainnet-gate.py` fully green;
+11. deployed Mainnet bytecode verified against the audited artifact before initialization;
+12. canonical USDT/USDC vault-authority and service-Treasury ATAs created if absent and verified;
+13. deliberately small Mainnet smoke while upgrade authority is retained;
+14. deployed bytecode/state reverified;
+15. only then permanently remove upgrade authority.
 
-## Important Solana property
+## Solana time property
 
-Time does not execute transactions by itself. After the grace timestamp, unclaimed value is economically treasury-destined, but physical token movement occurs on the next instruction that settles or touches the relevant state. This does not require a platform-funded transaction per commission event.
+Time does not execute transactions automatically. Once a grace deadline passes, value is economically Treasury-destined, but physical token movement occurs on the next instruction that settles/touches the relevant state. No platform-funded transaction is required for every commission event.
 
-## Progressive weekly activity and monetization depth
+## Rank / badge V1
 
-The core now separates being ACTIVE from how deep an upline can monetize. Successful
-ACTIVE weeks require 10/10/20/20/30/30/40/40/50 units, capped at 50 from week 9. Only
-successfully-started ACTIVE weeks advance the requirement. During an ACTIVE week,
-personal purchases accumulate toward depth: 10=>U3, 25=>U4, 50=>U5, 100=>U6,
-200=>U7, 350=>U8, 500=>U9. Unlocking is prospective only; previously unqualified
-levels are never recovered or compressed and route to Treasury. Pioneer remains a
-separate 1,000-units-per-single-purchase rule and is strictly ACTIVE/GRACE-gated.
-Ranks/badges are deterministic indexer-layer metadata; see `RANK_BADGE_SPEC.md`.
+Ranks are deterministic off-chain metadata and do not change the frozen payout core. See `RANK_BADGE_SPEC.md`.
