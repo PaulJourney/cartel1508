@@ -400,18 +400,16 @@ for (let i = 0; i < 12; i += 1) {
 }
 const buyer = chain[11];
 
-// Relative to buyer: U1=index10 ... U9=index2. U10/U11=index1/0 are real but out of payout range.
-// Set U4-U9 exactly ONE UNIT BELOW their unlock boundary.
 const preBoundaryUnits = new Map([
-  [10, 10], // U1
-  [9, 10],  // U2
-  [8, 10],  // U3
-  [7, 24],  // U4 needs 25
-  [6, 49],  // U5 needs 50
-  [5, 99],  // U6 needs 100
-  [4, 199], // U7 needs 200
-  [3, 349], // U8 needs 350
-  [2, 499], // U9 needs 500
+  [10, 10],
+  [9, 10],
+  [8, 10],
+  [7, 24],
+  [6, 49],
+  [5, 99],
+  [4, 199],
+  [3, 349],
+  [2, 499],
 ]);
 
 for (const [index, units] of [...preBoundaryUnits.entries()].sort((a, b) => a[0] - b[0])) {
@@ -445,7 +443,6 @@ invariant(
   "below-boundary purchase must route exactly 20% to Treasury (5 service + 13 locked + 2 Pioneer-unassigned)",
 );
 
-// Add exactly 1 unit to U4-U9, crossing every boundary prospectively.
 for (const index of [7, 6, 5, 4, 3, 2]) {
   await purchase(chain[index], usdcMint, 1, `${chain[index].name} crosses exact depth boundary +1`);
   const state = await userState(chain[index]);
@@ -524,6 +521,9 @@ await claimExact(dual, "USDC", "dual-token claims USDC only");
 
 console.log("\n=== PHASE 3: adversarial / rollback transactions on real Devnet ===");
 
+// Keep spendable USDC available so tampered-ancestry rejection cannot be a false
+// positive caused by insufficient token balance before the ancestry walk executes.
+await mintUnits(buyer, usdcMint, 10);
 const buyerUsdcBalanceBeforeBad = await tokenAmount(buyerUsdc);
 const pBeforeBad = await protocolState();
 const statesBeforeBad = await Promise.all(chain.map(userState));
