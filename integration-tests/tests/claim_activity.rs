@@ -234,4 +234,34 @@ fn inactive_sponsor_rewards_are_treasury_destined_and_cannot_be_claimed() {
     ctx.svm.assert_token_balance(&vault_usdc, 0);
     assert_eq!(50_000_000u64 + 50_000_000u64, 100 * UNIT);
 
+    // Replay/double-claim protection: the exact same user must not be able to pull
+    // the already-consumed SELF/network/Pioneer entitlement twice.
+    let buyer_after_first_claim = read_user(&ctx, buyer_pda);
+    assert_eq!(buyer_after_first_claim.self_accrued_usdc, 0);
+    assert_eq!(buyer_after_first_claim.network_claimable_usdc, 0);
+    assert_eq!(buyer_after_first_claim.lifetime_claimed_usdc, 50_000_000u128);
+    ctx.svm.expire_blockhash();
+    let second_buyer_claim_ix = ctx
+        .program()
+        .accounts(service_referral_protocol::accounts::Claim {
+            wallet: buyer.pubkey(),
+            protocol,
+            user: buyer_pda,
+            vault_authority,
+            vault_token: vault_usdc,
+            destination: buyer_usdc,
+            token_program: spl_token::id(),
+        })
+        .args(service_referral_protocol::instruction::Claim {})
+        .instruction()
+        .expect("second buyer claim ix");
+    let second_buyer_claim = ctx
+        .execute_instruction(second_buyer_claim_ix, &[&buyer])
+        .expect("second buyer claim result");
+    assert!(!second_buyer_claim.is_success(), "already-claimed value must not be claimable twice");
+    let buyer_after_second_claim_attempt = read_user(&ctx, buyer_pda);
+    assert_eq!(buyer_after_second_claim_attempt.lifetime_claimed_usdc, 50_000_000u128);
+    ctx.svm.assert_token_balance(&buyer_usdc, 50_000_000);
+    ctx.svm.assert_token_balance(&treasury_usdc, 50_000_000);
+    ctx.svm.assert_token_balance(&vault_usdc, 0);
 }
