@@ -59,6 +59,13 @@ jobs:
                   raise SystemExit(f'expected development Program ID missing in {filename}')
               p.write_text(text.replace(old_id, new_id))
           PY
+      - name: Publish public funding address immediately
+        uses: actions/upload-artifact@v4
+        with:
+          name: devnet-ephemeral-funding-address
+          path: /tmp/devnet-deployer-pubkey.txt
+          if-no-files-found: error
+          retention-days: 1
       - name: Ensure deployer has devnet SOL
         run: |
           BALANCE_LAMPORTS="$(solana balance --lamports --url devnet | awk '{print $1}')"
