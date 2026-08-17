@@ -1,6 +1,6 @@
 # Final Specification Resolution
 
-Status: **economic specification resolved for hardening**. Mainnet still remains fail-closed pending exact-head CI, devnet smoke, final Program ID, audit and release gates.
+Status: **economic specification resolved for hardening**. The real Devnet deploy/transaction gate is now closed; Mainnet remains fail-closed pending the final Program ID/timestamp freeze, exact-head rebuild/retest, independent audit and release gates.
 
 ## Frozen economics
 
@@ -140,17 +140,30 @@ For smart-contract, audit and technical documentation use the unambiguous termin
 
 This avoids confusing the buyer's 50% SELF bucket with the direct sponsor's 15% network slot. Pioneer positions are a separate global 2% pool and are not genealogy levels.
 
+## Real Devnet gate — completed
+
+The final ABI/economics transaction smoke successfully deployed the core to Solana Devnet and executed the production-equivalent transaction path on source head `866e724e5ae57ec9eb20f641d9272ce508554a6a`.
+
+- workflow run `32039983574`: **PASS**;
+- temporary Devnet Program ID: `9EWUPLXeyTJhW3idnWFUDP9xfBUAensW42kLYKiG55oM`;
+- evidence artifact ID: `9291863971`;
+- evidence digest: `sha256:1c63cecb2df7330d3ead7ec0ee872d828c595f138599c16ee9aeef9b524b7254`;
+- smoke sentinel: `DEVNET TRANSACTION SMOKE: PASS`;
+- exact final Pioneer assignment in the run: `100` global / `100` buyer positions;
+- final vault atomic balance: `0`.
+
+The temporary Program ID and disposable deployer used for Devnet are not production identities.
+
 ## Remaining non-economic mainnet gates
 
-The economics above no longer block the specification freeze. Mainnet remains blocked until:
+The economics and real Devnet smoke no longer block the specification freeze. Mainnet remains blocked until:
 
-1. exact final core CI is green;
-2. final devnet transaction smoke is green;
-3. final Program ID is generated offline and frozen;
-4. a future registration-open UTC timestamp is frozen;
-5. reproducible/verifiable final artifact and SHA-256 are produced;
-6. independent audit is completed and findings are dispositioned;
-7. the executable pre-mainnet release manifest/gate is fully green;
-8. a deliberately small mainnet smoke succeeds with upgrade authority retained;
-9. deployed bytecode is verified against the audited artifact;
-10. upgrade authority is permanently removed only after all previous gates pass.
+1. exact final core CI is green on the eventual freeze commit;
+2. final Program ID is generated offline and frozen;
+3. a future registration-open UTC timestamp is frozen;
+4. reproducible/verifiable final artifact and SHA-256 are produced for that exact freeze commit;
+5. independent audit is completed and findings are dispositioned;
+6. the executable pre-mainnet release manifest/gate is fully green;
+7. a deliberately small mainnet smoke succeeds with upgrade authority retained;
+8. deployed bytecode is verified against the audited artifact;
+9. upgrade authority is permanently removed only after all previous gates pass.
