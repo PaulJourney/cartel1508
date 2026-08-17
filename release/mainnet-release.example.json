@@ -18,5 +18,7 @@
   "devnet_smoke_evidence_sha256": "<FINAL_DEVNET_SMOKE_EVIDENCE_SHA256>",
   "devnet_smoke_status": "pending",
   "audit_status": "pending",
-  "smoke_test_plan_approved": false
+  "smoke_test_plan_approved": false,
+  "activity_profile": "ACTIVE_WEEKS_10_10_20_20_30_30_40_40_50_CAP",
+  "depth_profile": "WEEKLY_DEPTH_10U3_25U4_50U5_100U6_200U7_350U8_500U9"
 }

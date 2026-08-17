@@ -139,3 +139,14 @@ Do **not** make the program immutable on mainnet until all of these pass. CI evi
 ## Important Solana property
 
 Time does not execute transactions by itself. After the grace timestamp, unclaimed value is economically treasury-destined, but physical token movement occurs on the next instruction that settles or touches the relevant state. This does not require a platform-funded transaction per commission event.
+
+## Progressive weekly activity and monetization depth
+
+The core now separates being ACTIVE from how deep an upline can monetize. Successful
+ACTIVE weeks require 10/10/20/20/30/30/40/40/50 units, capped at 50 from week 9. Only
+successfully-started ACTIVE weeks advance the requirement. During an ACTIVE week,
+personal purchases accumulate toward depth: 10=>U3, 25=>U4, 50=>U5, 100=>U6,
+200=>U7, 350=>U8, 500=>U9. Unlocking is prospective only; previously unqualified
+levels are never recovered or compressed and route to Treasury. Pioneer remains a
+separate 1,000-units-per-single-purchase rule and is strictly ACTIVE/GRACE-gated.
+Ranks/badges are deterministic indexer-layer metadata; see `RANK_BADGE_SPEC.md`.

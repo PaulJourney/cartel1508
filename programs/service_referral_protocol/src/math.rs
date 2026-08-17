@@ -68,6 +68,32 @@ pub fn pioneer_positions_for_purchase(units: u64, already_assigned: u16) -> u16 
     requested.min(remaining) as u16
 }
 
+/// Required personal units to start a given ACTIVE week. Week numbering starts
+/// at one. The requirement rises every two successfully-started ACTIVE weeks and
+/// caps permanently at 50 units from week 9 onward.
+pub fn active_requirement_for_week(week_number: u32) -> u64 {
+    let normalized = week_number.max(1);
+    let tier = ((normalized - 1) / ACTIVE_WEEK_TIER_SPAN) as usize;
+    ACTIVE_WEEK_REQUIREMENT_UNITS[tier.min(ACTIVE_WEEK_REQUIREMENT_UNITS.len() - 1)]
+}
+
+pub fn next_active_requirement(active_weeks_started: u32) -> u64 {
+    active_requirement_for_week(active_weeks_started.saturating_add(1))
+}
+
+/// Maximum network level monetizable from personal units in the current/last
+/// ACTIVE week. Values below 10 unlock no network depth.
+pub fn network_depth_for_units(units: u64) -> u8 {
+    let mut depth = 0u8;
+    for (index, threshold) in NETWORK_DEPTH_UNIT_THRESHOLDS.iter().enumerate() {
+        if units < *threshold {
+            break;
+        }
+        depth = (index as u8) + 3;
+    }
+    depth
+}
+
 pub fn activity_status(user: &UserState, now: i64) -> ActivityStatus {
     if user.active_until > 0 && now <= user.active_until {
         ActivityStatus::Active
@@ -102,8 +128,7 @@ mod tests {
     fn global_unit_ranges_are_contiguous_unique_and_support_huge_batches() {
         let (first_a, last_a, next_a) = allocate_unit_range(1, 10).unwrap();
         assert_eq!((first_a, last_a, next_a), (1, 10, 11));
-        let (first_b, last_b, next_b) =
-            allocate_unit_range(next_a, 100_000_000_000).unwrap();
+        let (first_b, last_b, next_b) = allocate_unit_range(next_a, 100_000_000_000).unwrap();
         assert_eq!(first_b, 11);
         assert_eq!(last_b, 100_000_000_010);
         assert_eq!(next_b, 100_000_000_011);
@@ -127,6 +152,56 @@ mod tests {
         // Once 100/100 is reached the pool can never create another position.
         assert_eq!(pioneer_positions_for_purchase(1_000, 100), 0);
         assert_eq!(pioneer_positions_for_purchase(u64::MAX, 100), 0);
+    }
+
+    #[test]
+    fn progressive_active_requirement_caps_at_fifty() {
+        let expected = [
+            (1, 10),
+            (2, 10),
+            (3, 20),
+            (4, 20),
+            (5, 30),
+            (6, 30),
+            (7, 40),
+            (8, 40),
+            (9, 50),
+            (10, 50),
+            (100, 50),
+        ];
+        for (week, units) in expected {
+            assert_eq!(active_requirement_for_week(week), units);
+        }
+        assert_eq!(next_active_requirement(0), 10);
+        assert_eq!(next_active_requirement(1), 10);
+        assert_eq!(next_active_requirement(2), 20);
+        assert_eq!(next_active_requirement(8), 50);
+        assert_eq!(next_active_requirement(u32::MAX), 50);
+    }
+
+    #[test]
+    fn weekly_units_unlock_exact_network_depth_boundaries() {
+        let expected = [
+            (0, 0),
+            (9, 0),
+            (10, 3),
+            (24, 3),
+            (25, 4),
+            (49, 4),
+            (50, 5),
+            (99, 5),
+            (100, 6),
+            (199, 6),
+            (200, 7),
+            (349, 7),
+            (350, 8),
+            (499, 8),
+            (500, 9),
+            (10_000, 9),
+        ];
+        for (units, depth) in expected {
+            assert_eq!(network_depth_for_units(units), depth);
+        }
     }
 
     #[test]

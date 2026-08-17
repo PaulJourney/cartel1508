@@ -24,6 +24,8 @@ EXPECTED = {
     "usdt_mint": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
     "usdc_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "economics_profile": "SELF50_NETWORK43_PIONEER2_SERVICE5",
+    "activity_profile": "ACTIVE_WEEKS_10_10_20_20_30_30_40_40_50_CAP",
+    "depth_profile": "WEEKLY_DEPTH_10U3_25U4_50U5_100U6_200U7_350U8_500U9",
     "pioneer_position_cap": 100,
     "pioneer_single_purchase_units": 1000,
     "pioneer_rule_b": True,
@@ -104,6 +106,16 @@ def main() -> int:
         blockers.append("purchase_and_distribute is not using the final purchase split")
     if 'for i in 1..9' not in core_lib or 'pub upline_8:' not in core_lib or 'pub upline_9:' in core_lib:
         blockers.append("production referral traversal is not frozen to sponsor plus eight ancestors")
+    if 'ACTIVE_WEEK_REQUIREMENT_UNITS: [u64; 5] = [10, 20, 30, 40, 50]' not in constants or 'ACTIVE_WEEK_TIER_SPAN: u32 = 2' not in constants:
+        blockers.append("progressive ACTIVE weekly schedule is not frozen")
+    if 'NETWORK_DEPTH_UNIT_THRESHOLDS: [u64; 7] = [10, 25, 50, 100, 200, 350, 500]' not in constants:
+        blockers.append("weekly U1-U9 depth schedule is not frozen")
+    if 'pub active_weeks_started: u32' not in state or 'pub current_week_units: u64' not in state:
+        blockers.append("weekly activity/depth state is missing")
+    if 'distribute_network_level(' not in core_lib or 'network_depth_for_units(user.current_week_units)' not in core_lib:
+        blockers.append("network payouts are not gated by weekly personal-unit depth")
+    if 'let pioneer = pioneer_due(user, p, mint)?' not in core_lib or 'preserve_self_and_pioneer' in core_lib:
+        blockers.append("Pioneer is not strictly ACTIVE/GRACE-gated after inactivity")
 
     # Pioneer release invariants are mainnet gates, not documentation-only rules.
     if 'PIONEER_SLOTS: u16 = 100' not in constants:
@@ -190,7 +202,7 @@ def main() -> int:
 
     required = [
         "commit_sha", "program_id", "registration_open_at", "service_treasury",
-        "usdt_mint", "usdc_mint", "economics_profile", "pioneer_position_cap",
+        "usdt_mint", "usdc_mint", "economics_profile", "activity_profile", "depth_profile", "pioneer_position_cap",
         "pioneer_single_purchase_units", "pioneer_rule_b", "so_sha256",
         "audit_report_sha256", "protocol_ci_run_url", "rustsec_run_url",
         "verified_build_run_url", "devnet_smoke_run_url",

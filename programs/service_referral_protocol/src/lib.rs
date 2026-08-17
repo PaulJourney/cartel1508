@@ -17,7 +17,10 @@ pub mod service_referral_protocol {
     use super::*;
 
     pub fn initialize(ctx: Context<Initialize>, registration_open_at: i64) -> Result<()> {
-        require!(constants::percentages_valid(), ProtocolError::InvalidPercentages);
+        require!(
+            constants::percentages_valid(),
+            ProtocolError::InvalidPercentages
+        );
         require!(
             ctx.accounts.usdt_mint.decimals == TOKEN_DECIMALS as u8,
             ProtocolError::InvalidTokenDecimals
@@ -39,7 +42,10 @@ pub mod service_referral_protocol {
         )?;
 
         let now = Clock::get()?.unix_timestamp;
-        require!(registration_open_at >= now, ProtocolError::RegistrationOpenInPast);
+        require!(
+            registration_open_at >= now,
+            ProtocolError::RegistrationOpenInPast
+        );
 
         let p = &mut ctx.accounts.protocol;
         p.bump = ctx.bumps.protocol;
@@ -75,6 +81,8 @@ pub mod service_referral_protocol {
         root.pioneer_positions = 0;
         root.active_until = 0;
         root.grace_until = 0;
+        root.active_weeks_started = 0;
+        root.current_week_units = 0;
         root.qualification_progress_units = 0;
         root.qualification_window_started_at = 0;
         root.lifetime_service_units = 0;
@@ -97,7 +105,10 @@ pub mod service_referral_protocol {
     pub fn register(ctx: Context<Register>) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
         let p = &mut ctx.accounts.protocol;
-        require!(now >= p.registration_open_at, ProtocolError::RegistrationNotOpen);
+        require!(
+            now >= p.registration_open_at,
+            ProtocolError::RegistrationNotOpen
+        );
         require!(
             ctx.accounts.referrer.wallet == ctx.accounts.referrer_wallet.key(),
             ProtocolError::ReferrerMismatch
@@ -122,6 +133,8 @@ pub mod service_referral_protocol {
         u.pioneer_positions = 0;
         u.active_until = 0;
         u.grace_until = 0;
+        u.active_weeks_started = 0;
+        u.current_week_units = 0;
         u.qualification_progress_units = 0;
         u.qualification_window_started_at = 0;
         u.lifetime_service_units = 0;
@@ -138,6 +151,12 @@ pub mod service_referral_protocol {
         u.lifetime_expired_usdc = 0;
         u.pioneer_checkpoint_usdt = 0;
         u.pioneer_checkpoint_usdc = 0;
+
+        emit!(UserRegistered {
+            wallet: u.wallet,
+            referrer: u.referrer,
+            registered_at: now,
+        });
         Ok(())
     }
 
@@ -147,7 +166,7 @@ pub mod service_referral_protocol {
     /// - transfers exactly `units * 1 stablecoin` into the canonical vault;
     /// - allocates globally unique units and updates buyer activity;
     /// - credits the buyer/self economic level with 50%;
-    /// - credits the immutable sponsor plus eight ancestors with the frozen 43% schedule;
+    /// - schedules the frozen 43% across sponsor + eight ancestors, paying only levels unlocked by each upline's weekly personal units;
     /// - accrues the 2% Pioneer pool;
     /// - routes the 5% service allocation plus unallocated/expired value to treasury.
     ///
@@ -271,30 +290,22 @@ pub mod service_referral_protocol {
                     .ok_or(ProtocolError::ArithmeticOverflow)?;
             }
         } else {
-            let prior_expired = expire_unclaimed_for_mint(
-                &mut ctx.accounts.direct_referrer,
-                now,
-                p,
-                mint,
-            )?;
+            let prior_expired =
+                expire_unclaimed_for_mint(&mut ctx.accounts.direct_referrer, now, p, mint)?;
             expired_flow = expired_flow
                 .checked_add(prior_expired)
                 .ok_or(ProtocolError::ArithmeticOverflow)?;
 
-            match activity_status(&ctx.accounts.direct_referrer, now) {
-                ActivityStatus::Active => {
-                    add_network_claimable(&mut ctx.accounts.direct_referrer, p, mint, levels[0])?
-                }
-                ActivityStatus::Grace => {
-                    add_network_pending(&mut ctx.accounts.direct_referrer, p, mint, levels[0])?
-                }
-                ActivityStatus::Inactive => {
-                    mark_user_expired(&mut ctx.accounts.direct_referrer, p, mint, levels[0])?;
-                    expired_flow = expired_flow
-                        .checked_add(levels[0])
-                        .ok_or(ProtocolError::ArithmeticOverflow)?;
-                }
-            }
+            distribute_network_level(
+                &mut ctx.accounts.direct_referrer,
+                p,
+                mint,
+                levels[0],
+                1,
+                now,
+                &mut unallocated,
+                &mut expired_flow,
+            )?;
 
             let uplines = [
                 ctx.accounts.upline_1.as_ref(),
@@ -312,11 +323,9 @@ pub mod service_referral_protocol {
             // next eight ancestors. No tenth upline account can receive value.
             for i in 1..9 {
                 let ai = &uplines[i - 1];
-                let expected_key = Pubkey::find_program_address(
-                    &[b"user", expected_wallet.as_ref()],
-                    &crate::ID,
-                )
-                .0;
+                let expected_key =
+                    Pubkey::find_program_address(&[b"user", expected_wallet.as_ref()], &crate::ID)
+                        .0;
                 require!(ai.key() == expected_key, ProtocolError::InvalidUpline);
                 let mut upline: Account<UserState> = Account::try_from(ai)?;
                 require!(
@@ -338,20 +347,16 @@ pub mod service_referral_protocol {
                     .checked_add(previously_expired)
                     .ok_or(ProtocolError::ArithmeticOverflow)?;
 
-                match activity_status(&upline, now) {
-                    ActivityStatus::Active => {
-                        add_network_claimable(&mut upline, p, mint, levels[i])?
-                    }
-                    ActivityStatus::Grace => {
-                        add_network_pending(&mut upline, p, mint, levels[i])?
-                    }
-                    ActivityStatus::Inactive => {
-                        mark_user_expired(&mut upline, p, mint, levels[i])?;
-                        expired_flow = expired_flow
-                            .checked_add(levels[i])
-                            .ok_or(ProtocolError::ArithmeticOverflow)?;
-                    }
-                }
+                distribute_network_level(
+                    &mut upline,
+                    p,
+                    mint,
+                    levels[i],
+                    (i + 1) as u8,
+                    now,
+                    &mut unallocated,
+                    &mut expired_flow,
+                )?;
                 expected_wallet = upline.referrer;
                 upline.exit(&crate::ID)?;
             }
@@ -403,6 +408,9 @@ pub mod service_referral_protocol {
         let pioneer_positions_added =
             assign_pioneer_positions_after_purchase(&mut ctx.accounts.user, p, units)?;
         let pioneer_positions_total = p.pioneer_positions_assigned;
+        let buyer_network_depth = network_depth_for_units(ctx.accounts.user.current_week_units);
+        let next_active_requirement_units =
+            next_active_requirement(ctx.accounts.user.active_weeks_started);
 
         emit!(UnitsPurchased {
             buyer: ctx.accounts.wallet.key(),
@@ -413,6 +421,13 @@ pub mod service_referral_protocol {
             last_unit_id,
             pioneer_positions_added,
             pioneer_positions_total,
+            active_weeks_started: ctx.accounts.user.active_weeks_started,
+            current_week_units: ctx.accounts.user.current_week_units,
+            qualification_progress_units: ctx.accounts.user.qualification_progress_units,
+            network_depth: buyer_network_depth,
+            next_active_requirement_units,
+            active_until: ctx.accounts.user.active_until,
+            grace_until: ctx.accounts.user.grace_until,
             purchased_at: now,
         });
         Ok(())
@@ -507,6 +522,13 @@ pub mod service_referral_protocol {
 }
 
 #[event]
+pub struct UserRegistered {
+    pub wallet: Pubkey,
+    pub referrer: Pubkey,
+    pub registered_at: i64,
+}
+
+#[event]
 pub struct UnitsPurchased {
     pub buyer: Pubkey,
     pub mint: Pubkey,
@@ -516,6 +538,13 @@ pub struct UnitsPurchased {
     pub last_unit_id: u128,
     pub pioneer_positions_added: u16,
     pub pioneer_positions_total: u16,
+    pub active_weeks_started: u32,
+    pub current_week_units: u64,
+    pub qualification_progress_units: u64,
+    pub network_depth: u8,
+    pub next_active_requirement_units: u64,
+    pub active_until: i64,
+    pub grace_until: i64,
     pub purchased_at: i64,
 }
 
@@ -702,7 +731,10 @@ fn validate_treasury_token_for_mint(
 ) -> Result<()> {
     require_supported_mint(p, mint)?;
     require!(treasury.mint == mint, ProtocolError::MintMismatch);
-    require!(treasury.owner == p.service_treasury, ProtocolError::WrongTreasury);
+    require!(
+        treasury.owner == p.service_treasury,
+        ProtocolError::WrongTreasury
+    );
     require!(
         treasury.key() == canonical_ata(p.service_treasury, mint),
         ProtocolError::NonCanonicalTokenAccount
@@ -748,6 +780,20 @@ fn update_activity_after_purchase(
         .checked_add(1)
         .ok_or(ProtocolError::ArithmeticOverflow)?;
 
+    // Purchases made during an already ACTIVE 7-day cycle increase only that
+    // cycle's monetization depth. They never pre-qualify the following week.
+    if pre_status == ActivityStatus::Active {
+        user.current_week_units = user
+            .current_week_units
+            .checked_add(units)
+            .ok_or(ProtocolError::ArithmeticOverflow)?;
+        return Ok(());
+    }
+
+    // GRACE/INACTIVE purchases accumulate toward the next successfully-started
+    // ACTIVE week. A partial qualification has at most one 7-day accumulation
+    // window; stale progress is discarded, while inactive calendar time alone
+    // never advances active_weeks_started.
     if user.qualification_progress_units > 0
         && now
             > user
@@ -766,9 +812,16 @@ fn update_activity_after_purchase(
         .checked_add(units)
         .ok_or(ProtocolError::ArithmeticOverflow)?;
 
-    if user.qualification_progress_units >= ACTIVITY_THRESHOLD_UNITS {
+    let required = next_active_requirement(user.active_weeks_started);
+    if user.qualification_progress_units >= required {
+        let activating_units = user.qualification_progress_units;
         user.qualification_progress_units = 0;
         user.qualification_window_started_at = 0;
+        user.active_weeks_started = user
+            .active_weeks_started
+            .checked_add(1)
+            .ok_or(ProtocolError::ArithmeticOverflow)?;
+        user.current_week_units = activating_units;
         user.active_until = now
             .checked_add(ACTIVE_SECONDS)
             .ok_or(ProtocolError::ArithmeticOverflow)?;
@@ -849,6 +902,39 @@ fn add_network_pending(
     Ok(())
 }
 
+fn distribute_network_level(
+    user: &mut UserState,
+    p: &mut ProtocolState,
+    mint: Pubkey,
+    amount: u64,
+    level_number: u8,
+    now: i64,
+    unallocated: &mut u64,
+    expired_flow: &mut u64,
+) -> Result<()> {
+    let status = activity_status(user, now);
+    if matches!(status, ActivityStatus::Active | ActivityStatus::Grace)
+        && network_depth_for_units(user.current_week_units) < level_number
+    {
+        *unallocated = unallocated
+            .checked_add(amount)
+            .ok_or(ProtocolError::ArithmeticOverflow)?;
+        return Ok(());
+    }
+
+    match status {
+        ActivityStatus::Active => add_network_claimable(user, p, mint, amount)?,
+        ActivityStatus::Grace => add_network_pending(user, p, mint, amount)?,
+        ActivityStatus::Inactive => {
+            mark_user_expired(user, p, mint, amount)?;
+            *expired_flow = expired_flow
+                .checked_add(amount)
+                .ok_or(ProtocolError::ArithmeticOverflow)?;
+        }
+    }
+    Ok(())
+}
+
 fn vest_pending(user: &mut UserState) -> Result<()> {
     user.network_claimable_usdt = user
         .network_claimable_usdt
@@ -897,8 +983,9 @@ fn mark_user_expired(
 }
 
 /// True while an INACTIVE user is still inside a live partial qualification window.
-/// SELF and Pioneer value created during this window is provisional so splitting the
-/// same qualifying purchase into multiple transactions cannot change its economics.
+/// Only SELF value created during this window is provisional so splitting a personal
+/// qualification into multiple transactions does not destroy the buyer's own SELF.
+/// Pioneer remains strictly ACTIVE/GRACE-gated and receives no inactive exception.
 fn qualification_window_open(user: &UserState, now: i64) -> bool {
     if user.qualification_progress_units == 0 {
         return false;
@@ -913,11 +1000,10 @@ fn qualification_window_open(user: &UserState, now: i64) -> bool {
 /// destined expired value for one mint.
 ///
 /// A live partial qualification window is a narrow exception for the user's own
-/// SELF and Pioneer buckets: those remain provisional until the user either reaches
-/// the 10-unit threshold or the qualification window expires. Network amounts are
-/// never protected by this exception and continue to follow IC-A fixed-depth expiry.
-/// This makes 10 units bought as 10x1 economically equivalent to 10 units bought
-/// in one transaction for the buyer's own SELF/Pioneer entitlement.
+/// SELF bucket only. Pioneer remains ACTIVE-only (GRACE preserves already-earned
+/// value); once INACTIVE, Pioneer due is treasury-destined even while the wallet is
+/// accumulating units toward reactivation. Network amounts likewise receive no
+/// partial-window protection and continue to follow IC-A fixed-depth expiry.
 fn expire_unclaimed_for_mint(
     user: &mut UserState,
     now: i64,
@@ -928,15 +1014,11 @@ fn expire_unclaimed_for_mint(
         return Ok(0);
     }
 
-    let preserve_self_and_pioneer = qualification_window_open(user, now);
-    let pioneer = if preserve_self_and_pioneer {
-        0
-    } else {
-        pioneer_due(user, p, mint)?
-    };
+    let preserve_self = qualification_window_open(user, now);
+    let pioneer = pioneer_due(user, p, mint)?;
 
     let (self_reward, network_claimable, network_pending) = if mint == p.usdt_mint {
-        let self_reward = if preserve_self_and_pioneer {
+        let self_reward = if preserve_self {
             0
         } else {
             let value = user.self_accrued_usdt;
@@ -952,7 +1034,7 @@ fn expire_unclaimed_for_mint(
         user.network_pending_usdt = 0;
         values
     } else if mint == p.usdc_mint {
-        let self_reward = if preserve_self_and_pioneer {
+        let self_reward = if preserve_self {
             0
         } else {
             let value = user.self_accrued_usdc;
@@ -1102,7 +1184,10 @@ fn assign_pioneer_positions_after_purchase(
         .pioneer_positions_assigned
         .checked_add(added)
         .ok_or(ProtocolError::ArithmeticOverflow)?;
-    require!(p.pioneer_positions_assigned <= PIONEER_SLOTS, ProtocolError::ArithmeticOverflow);
+    require!(
+        p.pioneer_positions_assigned <= PIONEER_SLOTS,
+        ProtocolError::ArithmeticOverflow
+    );
     Ok(added)
 }
 
@@ -1171,11 +1256,7 @@ fn checkpoint_pioneer_claimed(
     Ok(())
 }
 
-fn take_claimable(
-    user: &mut UserState,
-    p: &ProtocolState,
-    mint: Pubkey,
-) -> Result<(u64, u64)> {
+fn take_claimable(user: &mut UserState, p: &ProtocolState, mint: Pubkey) -> Result<(u64, u64)> {
     if mint == p.usdt_mint {
         let direct = user.self_accrued_usdt;
         let network = user.network_claimable_usdt;

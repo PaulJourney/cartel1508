@@ -16,6 +16,7 @@ final_purchase = section('    pub fn purchase_and_distribute', '    pub fn settl
 claim = section('    pub fn claim', '}\n\n#[derive(Accounts)]')
 activity_helper = section('fn update_activity_after_purchase', 'fn add_self_reward')
 qualification_window_helper = section('fn qualification_window_open', 'fn expire_unclaimed_for_mint')
+network_distribution_helper = section('fn distribute_network_level', 'fn vest_pending')
 expiry_helper = section('fn expire_unclaimed_for_mint', '#[allow(clippy::too_many_arguments)]')
 production_accounts = section('pub struct PurchaseAndDistribute', 'pub struct SettleExpired')
 initialize = section('    pub fn initialize', '    pub fn register')
@@ -29,11 +30,11 @@ checks = {
     'legacy qualified revenue instruction removed': 'pub fn record_qualified_revenue' not in source and 'RecordQualifiedRevenue' not in source,
     'legacy revenue source state removed': 'qualified_revenue_source' not in source and 'qualified_revenue_source' not in state,
     'legacy adapter/source constants removed': 'MAINNET_REVENUE_ADAPTER_PROGRAM' not in constants and 'MAINNET_QUALIFIED_REVENUE_SOURCE' not in constants,
-    'final purchase is the sole reward event': all(x in final_purchase for x in ['split_purchase_amount(payment)', 'add_self_reward(', 'add_network_claimable(', 'accrue_pioneer(']),
+    'final purchase is the sole reward event': all(x in final_purchase for x in ['split_purchase_amount(payment)', 'add_self_reward(', 'distribute_network_level(', 'accrue_pioneer(']) and 'add_network_claimable(' in network_distribution_helper,
     'final purchase sends buyer funds to canonical vault': 'to: payment_destination' in final_purchase and 'validate_vault_token_for_mint' in final_purchase,
     'purchase expires stale buyer value before reactivation': final_purchase.index('settle_expired_all(') < final_purchase.index('update_activity_after_purchase('),
     'buyer receives the 50 percent SELF bucket': 'add_self_reward(&mut ctx.accounts.user' in final_purchase and 'add_self_reward(&mut ctx.accounts.direct_referrer' not in final_purchase,
-    'network starts at immutable sponsor': 'direct_referrer.wallet == ctx.accounts.user.referrer' in final_purchase and 'levels[0]' in final_purchase and 'add_network_claimable(&mut ctx.accounts.direct_referrer' in final_purchase,
+    'network starts at immutable sponsor': 'direct_referrer.wallet == ctx.accounts.user.referrer' in final_purchase and 'levels[0]' in final_purchase and 'distribute_network_level(' in final_purchase,
     'network contains exactly nine uplines': 'for i in 1..9' in final_purchase and all(f'upline_{i}' in production_accounts for i in range(1, 9)) and 'upline_9' not in production_accounts,
     'production network weights are nine levels and 43 percent': 'PURCHASE_NETWORK_LEVEL_BPS: [u64; 9]' in constants and '[1_500, 900, 600, 400, 250, 200, 150, 100, 200]' in constants,
     'aggregate percentages are frozen': all(x in constants for x in ['SELF_BPS: u64 = 5_000', 'NETWORK_BPS: u64 = 4_300', 'PIONEER_BPS: u64 = 200', 'SERVICE_BPS: u64 = 500']),
@@ -48,7 +49,12 @@ checks = {
     'activity partial window exists': 'qualification_window_started_at' in state and 'qualification_window_started_at' in activity_helper,
     'qualification window uses progress as existence sentinel': 'if user.qualification_progress_units == 0' in qualification_window_helper and 'qualification_window_started_at > 0' not in qualification_window_helper,
     'stale qualification reset is not gated by positive timestamp': 'if user.qualification_progress_units > 0' in activity_helper and 'qualification_window_started_at > 0' not in activity_helper,
-    'partial qualification preserves SELF and Pioneer only': 'qualification_window_open' in source and 'preserve_self_and_pioneer' in expiry_helper and 'network_claimable_usdt = 0' in expiry_helper and 'network_pending_usdt = 0' in expiry_helper,
+    'inactive partial qualification preserves SELF but not Pioneer': 'qualification_window_open' in source and 'let preserve_self = qualification_window_open' in expiry_helper and 'let pioneer = pioneer_due(user, p, mint)?' in expiry_helper and 'preserve_self_and_pioneer' not in expiry_helper and 'network_claimable_usdt = 0' in expiry_helper and 'network_pending_usdt = 0' in expiry_helper,
+    'progressive ACTIVE schedule is frozen': 'ACTIVE_WEEK_REQUIREMENT_UNITS: [u64; 5] = [10, 20, 30, 40, 50]' in constants and 'ACTIVE_WEEK_TIER_SPAN: u32 = 2' in constants and 'active_weeks_started' in state and 'current_week_units' in state and 'next_active_requirement(user.active_weeks_started)' in activity_helper,
+    'weekly depth thresholds are frozen': 'NETWORK_DEPTH_UNIT_THRESHOLDS: [u64; 7] = [10, 25, 50, 100, 200, 350, 500]' in constants and 'network_depth_for_units(user.current_week_units)' in network_distribution_helper,
+    'out-of-depth network share routes to Treasury without compression': 'level_number' in network_distribution_helper and 'unallocated' in network_distribution_helper and 'checked_add(amount)' in network_distribution_helper,
+    'active purchases increase depth without prequalifying next week': 'pre_status == ActivityStatus::Active' in activity_helper and 'current_week_units' in activity_helper and 'return Ok(())' in activity_helper,
+    'registration and purchase events support deterministic rank indexing': 'pub struct UserRegistered' in source and 'pub referrer: Pubkey' in source and all(x in source for x in ['active_weeks_started: u32', 'current_week_units: u64', 'network_depth: u8', 'next_active_requirement_units: u64']),
     'Pioneer positions require one 1000-unit purchase': 'PIONEER_POSITION_PURCHASE_UNITS: u64 = 1_000' in constants and 'units / PIONEER_POSITION_PURCHASE_UNITS' in math,
     'Pioneer registration consumes no position': 'u.pioneer_positions = 0' in source and 'Registration alone never consumes a Pioneer position' in source,
     'Pioneer global cap is absolute 100': 'pioneer_positions_for_purchase(units, p.pioneer_positions_assigned)' in source and 'p.pioneer_positions_assigned <= PIONEER_SLOTS' in source,

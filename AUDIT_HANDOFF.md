@@ -183,3 +183,7 @@ The sequence remains:
 8. only then permanently remove upgrade authority.
 
 After permanent authority removal there is no upgrade or rollback path.
+
+## New frozen behavior for review
+
+Review progressive ACTIVE-week qualification, prospective weekly U1-U9 depth, Treasury routing of locked levels, and strict Pioneer ACTIVE/GRACE gating. `RANK_BADGE_SPEC.md` is an indexer/UI specification only and must not be treated as an additional on-chain payout surface.

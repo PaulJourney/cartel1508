@@ -48,6 +48,14 @@ pub struct UserState {
     pub pioneer_positions: u16,
     pub active_until: i64,
     pub grace_until: i64,
+    /// Number of 7-day ACTIVE weeks successfully started by this wallet. Inactivity
+    /// does not advance this counter, so the progressive minimum never grows merely
+    /// because calendar time passed.
+    pub active_weeks_started: u32,
+    /// Personal units accumulated in the current ACTIVE week. During GRACE this is
+    /// intentionally retained so the just-finished week's depth remains valid while
+    /// rewards are pending. It is replaced only when the next ACTIVE week starts.
+    pub current_week_units: u64,
     pub qualification_progress_units: u64,
     /// Start of the current partial (<10 units) qualification window.
     pub qualification_window_started_at: i64,
@@ -69,10 +77,15 @@ pub struct UserState {
 }
 
 impl UserState {
-    pub const SPACE: usize = 283;
-    pub fn is_technical_root(&self) -> bool { self.wallet == Pubkey::default() }
+    pub const SPACE: usize = 295;
+    pub fn is_technical_root(&self) -> bool {
+        self.wallet == Pubkey::default()
+    }
 }
 
-
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ActivityStatus { Active, Grace, Inactive }
+pub enum ActivityStatus {
+    Active,
+    Grace,
+    Inactive,
+}

@@ -195,3 +195,14 @@ Historical qualified-revenue/adapter evidence is not production-release evidence
 - Marketing/business claims.
 
 The transaction builder remains security-relevant because it supplies the sponsor/upline account sequence; the on-chain program must independently verify that ancestry, but the client must still be audited for deterministic, correct account construction.
+
+## Weekly activity/depth invariants added to audit scope
+
+- ACTIVE-week requirements: weeks 1-2=10, 3-4=20, 5-6=30, 7-8=40, week 9+=50.
+- Calendar inactivity must never increment the ACTIVE-week counter.
+- While ACTIVE, purchases increase current-week personal units/depth and never prequalify the next week.
+- Depth thresholds are exactly 10=>U3, 25=>U4, 50=>U5, 100=>U6, 200=>U7, 350=>U8, 500=>U9.
+- Out-of-depth scheduled network value is Treasury/unallocated, never compressed and never retroactively recoverable.
+- GRACE retains the previous ACTIVE week's depth while network value is pending.
+- Pioneer positions are permanent but Pioneer economic due is ACTIVE/GRACE-gated; INACTIVE partial qualification preserves SELF only, not Pioneer.
+- Rank/badge logic is explicitly outside the payout core and must not modify 50/43/2/5 economics.
