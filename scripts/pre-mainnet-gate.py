@@ -32,7 +32,9 @@ EXPECTED = {
 }
 DEVELOPMENT_PROGRAM_IDS = {"4AuoBkj4vkH2K1jwUuECtVBqF6Q74efjGbaw7btuNjRV"}
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 ACTIONS_RUN_RE = re.compile(r"^https://github\.com/[^/]+/[^/]+/actions/runs/[0-9]+(?:/.*)?$")
+LEGACY_DEAD_PATHS = [ROOT / "scripts/revenue-adapter-static-gates.py"]
 
 
 def extract(pattern: str, text: str, label: str) -> str:
@@ -117,7 +119,6 @@ def main() -> int:
     if 'let pioneer = pioneer_due(user, p, mint)?' not in core_lib or 'preserve_self_and_pioneer' in core_lib:
         blockers.append("Pioneer is not strictly ACTIVE/GRACE-gated after inactivity")
 
-    # Pioneer release invariants are mainnet gates, not documentation-only rules.
     if 'PIONEER_SLOTS: u16 = 100' not in constants:
         blockers.append("Pioneer global position cap is not frozen to 100")
     if 'PIONEER_POSITION_PURCHASE_UNITS: u64 = 1_000' not in constants:
@@ -162,6 +163,9 @@ def main() -> int:
     for marker in legacy_markers:
         if marker in core_lib or marker in state or marker in constants:
             blockers.append(f"legacy revenue marker remains in final core: {marker}")
+    for legacy_path in LEGACY_DEAD_PATHS:
+        if legacy_path.exists():
+            blockers.append(f"obsolete legacy release tooling remains tracked: {legacy_path.relative_to(ROOT)}")
 
     if registration_open <= 0:
         blockers.append("registration_open_at is not frozen to a positive UTC unix timestamp")
@@ -202,12 +206,14 @@ def main() -> int:
 
     required = [
         "commit_sha", "program_id", "registration_open_at", "service_treasury",
-        "usdt_mint", "usdc_mint", "economics_profile", "activity_profile", "depth_profile", "pioneer_position_cap",
-        "pioneer_single_purchase_units", "pioneer_rule_b", "so_sha256",
-        "audit_report_sha256", "protocol_ci_run_url", "rustsec_run_url",
-        "verified_build_run_url", "devnet_smoke_run_url",
-        "devnet_smoke_evidence_sha256", "devnet_smoke_status", "audit_status",
-        "smoke_test_plan_approved",
+        "usdt_mint", "usdc_mint", "economics_profile", "activity_profile", "depth_profile",
+        "pioneer_position_cap", "pioneer_single_purchase_units", "pioneer_rule_b", "so_sha256",
+        "audit_report_sha256", "protocol_ci_run_url", "rustsec_run_url", "verified_build_run_url",
+        "devnet_comprehensive_source_sha", "devnet_comprehensive_run_url",
+        "devnet_comprehensive_evidence_sha256", "devnet_comprehensive_status",
+        "production_runtime_source_sha", "production_runtime_run_url",
+        "production_runtime_evidence_sha256", "production_runtime_status",
+        "audit_status", "smoke_test_plan_approved",
     ]
     for key in required:
         if manifest.get(key) in (None, "", 0, False):
@@ -224,19 +230,34 @@ def main() -> int:
 
     if source_sha and manifest.get("commit_sha") != source_sha:
         blockers.append("release manifest commit_sha does not match release source SHA")
+    if source_sha and manifest.get("production_runtime_source_sha") != source_sha:
+        blockers.append("production runtime evidence is not bound to the final release source SHA")
 
-    for key in ("so_sha256", "audit_report_sha256", "devnet_smoke_evidence_sha256"):
+    for key in ("devnet_comprehensive_source_sha", "production_runtime_source_sha"):
+        value = manifest.get(key)
+        if value and not GIT_SHA_RE.fullmatch(str(value)):
+            blockers.append(f"release manifest {key} is not a lowercase 40-hex git SHA")
+
+    for key in (
+        "so_sha256", "audit_report_sha256", "devnet_comprehensive_evidence_sha256",
+        "production_runtime_evidence_sha256",
+    ):
         value = manifest.get(key)
         if value and not SHA256_RE.fullmatch(str(value)):
             blockers.append(f"release manifest {key} is not a lowercase SHA-256 digest")
 
-    for key in ("protocol_ci_run_url", "rustsec_run_url", "verified_build_run_url", "devnet_smoke_run_url"):
+    for key in (
+        "protocol_ci_run_url", "rustsec_run_url", "verified_build_run_url",
+        "devnet_comprehensive_run_url", "production_runtime_run_url",
+    ):
         value = manifest.get(key)
         if value and not ACTIONS_RUN_RE.fullmatch(str(value)):
             blockers.append(f"{key} is not a GitHub Actions run URL")
 
-    if manifest.get("devnet_smoke_status") != "passed":
-        blockers.append("final devnet smoke status is not 'passed'")
+    if manifest.get("devnet_comprehensive_status") != "passed":
+        blockers.append("final Devnet comprehensive status is not 'passed'")
+    if manifest.get("production_runtime_status") != "passed":
+        blockers.append("final production-runtime validation status is not 'passed'")
     if manifest.get("audit_status") != "passed":
         blockers.append("independent audit status is not 'passed'")
     if manifest.get("smoke_test_plan_approved") is not True:
@@ -267,7 +288,7 @@ def main() -> int:
             print(f"- {blocker}")
         return 1
 
-    print("\nPASS: final core-only release gate is green")
+    print("\nPASS: final release gate is green")
     return 0
 
 
