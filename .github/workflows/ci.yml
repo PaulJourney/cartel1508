@@ -18,6 +18,10 @@ jobs:
         run: node tests/reference-model.mjs
       - name: Rank/badge model
         run: node tests/rank-model.mjs
+      - name: Devnet validation-client syntax
+        run: |
+          node --check scripts/devnet-transaction-smoke.mjs
+          node --check scripts/devnet-comprehensive-validation.mjs
       - name: Static security/economic gates
         run: python3 scripts/static-gates.py
       - name: Prove pre-mainnet gate fails closed before final freeze
