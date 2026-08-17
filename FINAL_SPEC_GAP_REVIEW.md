@@ -1,169 +1,196 @@
-# Final Specification Resolution
+# Final Specification Resolution / Gap Review
 
-Status: **economic specification resolved for hardening**. The real Devnet deploy/transaction gate is now closed; Mainnet remains fail-closed pending the final Program ID/timestamp freeze, exact-head rebuild/retest, independent audit and release gates.
+Status: **economic specification resolved; Mainnet remains fail-closed**.
+
+The economic model is frozen and repeatedly validated in deterministic, LiteSVM and isolated Solana-runtime tests. A historical public-Devnet smoke has passed, but the **final public-Devnet comprehensive + runtime-security run remains a release blocker**. Final Program ID/timestamp freeze, production-runtime validation and independent audit also remain open.
 
 ## Frozen economics
 
 - 1 USDT/USDC = 1 logical unit.
-- Users may purchase unlimited units subject only to on-chain numeric/transaction limits.
-- Unit purchase is the sole production economic event.
-- Aggregate split is **50% SELF + 43% network + 2% Pioneer + 5% service**.
-- SELF is always the buyer of the units.
-- The network pool is scheduled across exactly nine immutable uplines, beginning with the buyer's direct sponsor.
-- Network schedule: `15 / 9 / 6 / 4 / 2.5 / 2 / 1.5 / 1 / 2` = 43%.
-- ACTIVE lasts 7 days and GRACE lasts 48 hours.
-- Claim is ACTIVE-only and claimant-paid.
-- GRACE temporarily preserves eligible unclaimed value.
-- Once INACTIVE, whole-atomic unclaimed SELF/network/Pioneer value is permanently treasury-destined under the rules below; late reactivation cannot recover expired value.
-- The production release is a single core Solana program.
+- Buyer-signed `purchase_and_distribute` is the sole production economic event.
+- SELF / buyer: 50%.
+- Nine immutable uplines: `15 / 9 / 6 / 4 / 2.5 / 2 / 1.5 / 1 / 2%` = 43%.
+- Pioneer pool: 2%.
+- Service: 5%.
+- Total: **100%** before deterministic integer handling.
+- No dynamic compression.
+- No separate self-reentry genealogy position.
+- Production release is one Solana/Anchor program plus the canonical SPL Token Program.
 
-## Frozen progressive ACTIVE-week rule
+## Progressive ACTIVE-week rule — resolved
 
-The former permanent `10 units = ACTIVE` rule is retired. The requirement now progresses only when a wallet successfully starts an ACTIVE week:
+Requirement advances only when a wallet successfully starts a new ACTIVE week:
 
-- ACTIVE weeks 1–2: **10 units** each;
-- ACTIVE weeks 3–4: **20 units** each;
-- ACTIVE weeks 5–6: **30 units** each;
-- ACTIVE weeks 7–8: **40 units** each;
-- ACTIVE week 9 onward: **50 units**, permanently capped at 50.
+- weeks 1–2: 10 units;
+- weeks 3–4: 20;
+- weeks 5–6: 30;
+- weeks 7–8: 40;
+- week 9 onward: 50 cap.
 
-The counter is based on successfully-started ACTIVE weeks, **not calendar time**. An inactive wallet that returns months later resumes from the same next-week requirement it had when it stopped.
+ACTIVE lasts seven days; GRACE lasts 48 hours. Calendar inactivity never advances the ladder. Purchases while already ACTIVE raise only `current_week_units`/depth and do not prequalify another week.
 
-A successful activation starts a personal seven-day ACTIVE cycle. Purchases made while already ACTIVE increase that cycle's personal-unit total and monetization depth only; they never pre-qualify a later week. During GRACE/INACTIVE, purchases accumulate toward the next ACTIVE-week requirement within one live seven-day qualification window. If that partial window expires before the requirement is reached, stale progress is discarded on the next touch.
+During GRACE/INACTIVE, purchases may accumulate toward the current next requirement inside one live seven-day window. Stale partial progress resets. During a live INACTIVE partial-qualification window, **SELF only** is provisionally preserved; Pioneer/network receive no partial exception.
 
-During an INACTIVE partial qualification window, only the buyer's own SELF amount is provisionally preserved. Pioneer and network value receive no inactive partial-qualification exception.
+Once INACTIVE, whole-atomic unclaimed SELF/network/Pioneer value is Treasury-destined. Stale value is settled before late reactivation so expired history cannot be rescued.
 
-## Frozen weekly network-depth rule
+## Weekly network depth — resolved
 
-The 43% schedule remains fixed, but an upline monetizes only levels unlocked by that wallet's **personal units in its current ACTIVE week**:
+Each upline's own personal units in the current ACTIVE week unlock maximum monetizable depth:
 
-- 10 units => **U1–U3**;
-- 25 units => **U1–U4**;
-- 50 units => **U1–U5**;
-- 100 units => **U1–U6**;
-- 200 units => **U1–U7**;
-- 350 units => **U1–U8**;
-- 500+ units => **U1–U9**.
+- 10 → U1–U3
+- 25 → U1–U4
+- 50 → U1–U5
+- 100 → U1–U6
+- 200 → U1–U7
+- 350 → U1–U8
+- 500+ → U1–U9
 
-Depth unlock is prospective only. Increasing personal units later in the same ACTIVE cycle never recovers U-level amounts from earlier purchases. When an ACTIVE/GRACE upline exists genealogically but the scheduled level is beyond that wallet's unlocked depth, that fixed share is treasury/unallocated. It is never compressed upward or reassigned.
+Unlock is prospective only. ACTIVE/GRACE scheduled levels beyond depth go to Treasury/unallocated. INACTIVE scheduled levels go to Treasury/expired. No share is compressed to another ancestor.
 
-GRACE retains the depth of the just-finished ACTIVE cycle while eligible network amounts remain pending. When the next ACTIVE week starts, `current_week_units` is replaced by the units that qualified the new week and depth is recalculated from that new total.
+## Pioneer positions — resolved
 
-## Frozen Pioneer rule — 100 purchase-earned positions
+The old first-100-registration Pioneer model is retired.
 
-The former rule assigning one Pioneer ID to each of the first 100 registrations is **retired**.
+- hard global cap: 100 positions;
+- registration: zero positions;
+- one purchase creates `floor(units / 1000)` candidates;
+- separate purchases never accumulate toward the threshold;
+- one wallet may own multiple/all positions;
+- assignment is capped by remaining capacity;
+- 98/100 + 3,000 units = exactly 2 final positions;
+- 100/100 blocks every later position;
+- only gross buyer-signed purchase units create positions;
+- **Rule B:** creating purchase accrues Pioneer before its new positions are assigned;
+- weighted checkpoints prevent retroactive entitlement;
+- unassigned virtual-slot shares go to Treasury;
+- positions are permanent, but INACTIVE unclaimed Pioneer due expires and cannot be recovered after reactivation.
 
-The final rule is:
+## Rank / badge V1 — resolved as non-payout metadata
 
-- there are exactly **100 Pioneer positions maximum**;
-- registration alone creates **zero** Pioneer positions;
-- positions are created only by the gross units of a single buyer-signed `purchase_and_distribute` transaction;
-- `candidate_positions = floor(units / 1000)`;
-- purchases from separate transactions never accumulate toward the 1,000-unit threshold;
-- one wallet may own multiple Pioneer positions;
-- `positions_added = min(candidate_positions, 100 - positions_already_assigned)`;
-- at 98/100, a 3,000-unit purchase creates exactly 2 positions, not 3;
-- at 100/100, every later purchase creates exactly 0 additional positions regardless of size;
-- SELF rewards, network/downline rewards, Pioneer rewards, claims, wallet balances and other receipts do not automatically create positions; only gross units in a buyer-signed purchase qualify.
+Rank remains off-chain. `UserRegistered` and `UnitsPurchased` events allow deterministic indexing of genealogy and purchase volume.
 
-### Pioneer Rule B
+`RANK_BADGE_SPEC.md` defines QNV, qualified legs, balance caps, Current Rank, Highest Lifetime Rank and Pioneer badge display. **Ranks never alter the frozen 50/43/2/5 payout core in V1.**
 
-The purchase that creates a Pioneer position does **not** pay that new position from its own 2% Pioneer allocation.
+## Self-reentry — retired
 
-The purchase first advances/distributes the current Pioneer pool using only positions that existed before the purchase. New positions are assigned afterward and enter at the then-current Pioneer index, so they begin earning from the **next global purchase**.
+One wallet has one immutable genealogy node. Repeated purchases are additional units of the same user. The intended buyer economic participation is represented by the 50% SELF bucket, not by synthetic self-sponsored genealogy positions.
 
-A wallet may acquire positions at multiple different times. Weighted reward debt/checkpoints preserve the correct entry index for every added position and prevent retroactive Pioneer rewards.
+Multiple Pioneer positions are separate global-pool ownership and do not create genealogy nodes.
 
-Each of the 100 positions represents one equal virtual share of the 2% pool. When fewer than 100 positions exist, the share corresponding to unassigned positions is treasury-destined; it is not redistributed among existing Pioneer holders.
+## Inactive compression — retired / IC-A frozen
 
-### Pioneer ACTIVE requirement
+- ACTIVE + sufficient depth: scheduled level claimable;
+- GRACE + sufficient retained depth: scheduled level preserved;
+- ACTIVE/GRACE + insufficient depth: Treasury/unallocated;
+- INACTIVE: Treasury/expired;
+- higher ancestors retain only their own fixed percentages.
 
-Pioneer ownership is permanent but Pioneer economics are activity-gated:
+## Validation state
 
-- ACTIVE: the wallet's owned Pioneer positions participate and due is claimable under the normal pull-claim path;
-- GRACE: already-eligible Pioneer entitlement remains preserved for timely reactivation;
-- INACTIVE: unclaimed Pioneer due is treasury-destined when settled/touched;
-- inactivity never deletes, transfers or recycles the underlying Pioneer positions;
-- reactivation cannot recover Pioneer value that expired while INACTIVE;
-- after reactivation, the permanent positions participate prospectively again.
+### Deterministic / LiteSVM — PASS
 
-If an INACTIVE Pioneer wallet makes a purchase that itself successfully reactivates the wallet, stale Pioneer due is settled first; the wallet is then ACTIVE before the current purchase's Pioneer accrual, so its pre-existing permanent positions may participate prospectively in that reactivation purchase. New positions created by that same purchase still obey Rule B.
+Coverage includes:
 
-## Rank and badge layer — non-payout V1
+- split conservation and large numeric boundaries;
+- exact ACTIVE/GRACE/INACTIVE time boundaries;
+- progressive ACTIVE ladder and no calendar progression;
+- full U1–U9 depth boundaries and prospective unlocking;
+- batching equivalence;
+- false ancestry rollback;
+- Pioneer Rule B, weighted checkpoints, inactivity and 100/100 cap;
+- double-claim rejection;
+- failed payment CPI after expiry settlement begins rolls the entire transaction back atomically.
 
-Rank is intentionally outside the payout core. `UserRegistered` and `UnitsPurchased` events expose enough deterministic data for an indexer to reconstruct immutable direct-referral legs, rolling purchase volume and qualification state.
+### Isolated Solana runtime — PASS
 
-V1 rank rules are defined in `RANK_BADGE_SPEC.md`:
+The program is built/deployed to `solana-test-validator` and exercised using signed transactions, real SPL Token accounts and PDAs.
 
-- Current Rank is based on rolling 30-day Qualified Network Volume (QNV), qualified legs and balance rules;
-- personal purchases are excluded from the user's own QNV rank calculation;
-- claimed earnings are excluded from rank;
-- Current Rank may rise or fall;
-- Highest Lifetime Rank is permanent historical status;
-- V1 rank/badges **do not modify the frozen 50/43/2/5 payout percentages**;
-- Pioneer is a separate permanent badge displayed as `PIONEER ×N`, not a rank rung.
+The comprehensive phase has repeatedly proven:
 
-## Resolved historical rule — self-reentry
+- 20 users;
+- 108,595 logical units;
+- complete U1–U9 scenarios;
+- USDT and USDC separation;
+- Pioneer 100/100;
+- final `nextUnitId = 108596`;
+- comprehensive-phase USDT vault = 0;
+- comprehensive-phase USDC vault = 0.
 
-The old concept of creating a separate genealogy position "under oneself" is **retired**.
+A dedicated runtime-security add-on has also passed:
 
-The final model achieves the intended economic effect without genealogy-position multiplication:
+- re-registration rejection;
+- spoofed referrer rejection;
+- structural self-referral rejection;
+- non-canonical Treasury ATA rejection with atomic rollback;
+- claim hijack rejection;
+- non-canonical destination rejection;
+- valid claim;
+- double-claim/replay rejection;
+- fake Treasury receives zero.
 
-- one `UserState` exists per wallet;
-- the user's registered referrer remains immutable;
-- every purchase treats the buyer as the **SELF economic level** and allocates 50% to that buyer subject to activity/expiry rules;
-- the immutable sponsor is the first network upline and receives its fixed 15% only when the sponsor is activity/depth eligible;
-- repeated purchases are additional units of the same user, not synthetic self-sponsored genealogy positions.
+The security add-on intentionally creates one additional post-saturation purchase and therefore leaves an independently asserted 0.2-USDC Pioneer liability after the comprehensive phase has already closed both vaults to zero.
 
-A wallet may nevertheless own multiple **Pioneer pool positions** under the separate purchase-earned Pioneer rule above; those positions affect only the 2% Pioneer pool and do not create additional genealogy nodes or network depths.
+## Public Solana Devnet
 
-## Resolved historical rule — inactive compression
+### Historical transaction smoke — PASS
 
-**IC-A is frozen.** The protocol uses fixed-depth percentages plus treasury routing/expiry, not dynamic compression.
+A real public-Devnet smoke passed on source-equivalent core head `866e724e5ae57ec9eb20f641d9272ce508554a6a`:
 
-For each of the nine network-upline slots:
+- run `32039983574`;
+- temporary Program ID `9EWUPLXeyTJhW3idnWFUDP9xfBUAensW42kLYKiG55oM`;
+- evidence artifact `9291863971`;
+- digest `sha256:1c63cecb2df7330d3ead7ec0ee872d828c595f138599c16ee9aeef9b524b7254`;
+- Pioneer reached 100/100;
+- post-cap purchase created zero positions;
+- final smoke vault = 0.
 
-- ACTIVE + sufficient weekly depth: that slot's amount is claimable;
-- GRACE + sufficient retained weekly depth: that slot's amount is pending/preserved for timely requalification;
-- ACTIVE/GRACE but insufficient depth: that slot's amount is treasury/unallocated;
-- INACTIVE: that slot's amount is permanently treasury-destined/expired;
-- higher ancestors keep only their own fixed percentages;
-- a locked or inactive user's percentage is not reassigned to another ancestor.
+This is supporting history only.
 
-## Economic-level terminology
+### Final public comprehensive + security — PENDING
 
-For product/UI purposes the system can be described as **10 economic levels including the buyer**.
+The final release candidate must run the maintained public workflow once after all free/local hardening is green. The same exact marker SHA must receive:
 
-For smart-contract, audit and technical documentation use the unambiguous terminology:
+- protocol CI;
+- RustSec;
+- verifiable build;
+- local comprehensive + security;
+- public Devnet comprehensive + security.
 
-**SELF + 9 uplines**
+The public workflow records exact source SHA, limits runtime mutation to temporary Program-ID substitution, records temporary `.so` hash/deployment evidence and publishes no private key.
 
-This avoids confusing the buyer's 50% SELF bucket with the direct sponsor's 15% network slot. Pioneer positions are a separate global 2% pool and are not genealogy levels.
+Until this run is `passed`, **public Devnet remains a Mainnet release blocker**.
 
-## Real Devnet gate — completed
+## Final production-runtime validation — PENDING
 
-The final ABI/economics transaction smoke successfully deployed the core to Solana Devnet and executed the production-equivalent transaction path on source head `866e724e5ae57ec9eb20f641d9272ce508554a6a`.
+After the offline Mainnet Program ID and future registration timestamp are frozen, the exact production artifact must be exercised in a production-compatible runtime environment. The evidence must be bound to the final release SHA and recorded in `release/mainnet-release.json`.
 
-- workflow run `32039983574`: **PASS**;
-- temporary Devnet Program ID: `9EWUPLXeyTJhW3idnWFUDP9xfBUAensW42kLYKiG55oM`;
-- evidence artifact ID: `9291863971`;
-- evidence digest: `sha256:1c63cecb2df7330d3ead7ec0ee872d828c595f138599c16ee9aeef9b524b7254`;
-- smoke sentinel: `DEVNET TRANSACTION SMOKE: PASS`;
-- exact final Pioneer assignment in the run: `100` global / `100` buyer positions;
-- final vault atomic balance: `0`.
+This is separate from development-equivalent local/Devnet evidence because the production feature pins Treasury, stablecoin mints and registration timestamp at initialization.
 
-The temporary Program ID and disposable deployer used for Devnet are not production identities.
+## Documentation / repository gaps resolved during red-team hardening
 
-## Remaining non-economic mainnet gates
+- README corrected from fixed 10-unit activity to progressive weekly qualification.
+- README/Audit Scope corrected so INACTIVE partial qualification preserves **SELF only**, not Pioneer.
+- `SECURITY.md` rewritten from obsolete Verifier/Adapter architecture to the final single-program threat model.
+- dead `scripts/revenue-adapter-static-gates.py` removed.
+- RustSec workflow changed to run on every PR head so final marker-only commits receive exact-head security evidence.
+- release manifest/gate strengthened to require separate public-Devnet comprehensive and final production-runtime evidence.
+- runtime security suite added for registration/Treasury/claim/replay attacks.
 
-The economics and real Devnet smoke no longer block the specification freeze. Mainnet remains blocked until:
+## Remaining Mainnet gates
 
-1. exact final core CI is green on the eventual freeze commit;
-2. final Program ID is generated offline and frozen;
-3. a future registration-open UTC timestamp is frozen;
-4. reproducible/verifiable final artifact and SHA-256 are produced for that exact freeze commit;
-5. independent audit is completed and findings are dispositioned;
-6. the executable pre-mainnet release manifest/gate is fully green;
-7. a deliberately small mainnet smoke succeeds with upgrade authority retained;
-8. deployed bytecode is verified against the audited artifact;
-9. upgrade authority is permanently removed only after all previous gates pass.
+Mainnet remains intentionally blocked until all of the following are complete:
+
+1. final public Devnet comprehensive + security run passes on the exact marker SHA;
+2. final Program ID keypair is generated offline and only its public key is frozen;
+3. future registration-open UTC timestamp is frozen;
+4. canonical vault/Treasury ATA bootstrap and verification procedure is included;
+5. final production artifact is rebuilt, reproduced and hash-matched;
+6. final production-runtime validation passes on the final release SHA;
+7. independent audit of exact frozen core + production transaction builder completes and all findings are dispositioned;
+8. `release/mainnet-release.json` is complete and executable pre-mainnet gate is fully green;
+9. Mainnet deploy occurs with temporary upgrade authority;
+10. deployed bytecode is verified against the audited artifact before initialization;
+11. frozen state is initialized and canonical ATAs are verified;
+12. deliberately small Mainnet smoke passes without consuming Pioneer positions;
+13. bytecode/state are reverified;
+14. upgrade authority is removed permanently **last**.
