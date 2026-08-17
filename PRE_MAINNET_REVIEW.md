@@ -1,6 +1,6 @@
 # Pre-Mainnet Irreversible Decisions — Core-Only Protocol
 
-Status: **NOT READY FOR MAINNET** until every blocking item below is closed.
+Status: **NOT READY FOR MAINNET** until every remaining blocking item below is closed.
 
 ## Business/economic decisions already frozen
 
@@ -74,21 +74,39 @@ The purchase path is rentless: no per-purchase `UnitBatch` PDA is created. Globa
 
 These are engineering evidences only. They do not replace the independent audit of the final frozen commit.
 
+## Devnet deployment / transaction gate — CLOSED
+
+A real GitHub-hosted Devnet deploy and transaction smoke completed successfully on core source head `866e724e5ae57ec9eb20f641d9272ce508554a6a`.
+
+Evidence:
+
+- GitHub Actions run: `32039983574` — **PASS**;
+- temporary Devnet Program ID: `9EWUPLXeyTJhW3idnWFUDP9xfBUAensW42kLYKiG55oM`;
+- deployment transaction: `643FxLkJ1mtKtd8Kh87QRFu481EC5nsWF2h76ctHjE47GFsrgLw3fL8QxWWnYQFJ1qs8iCYdLFF4kLtSf2CBcBLP`;
+- evidence artifact ID: `9291863971`;
+- artifact digest: `sha256:1c63cecb2df7330d3ead7ec0ee872d828c595f138599c16ee9aeef9b524b7254`;
+- smoke output: `DEVNET TRANSACTION SMOKE: PASS`;
+- Pioneer saturation: exactly `100/100` assigned and buyer-owned positions;
+- final tested vault atomic balance: `0`;
+- initial deployer balance: `5 SOL` Devnet;
+- final deployer balance: `2.62394996 SOL` Devnet.
+
+Subsequent cleanup commits only restored the manual-only workflow and removed the temporary funding trigger; they did not modify the protocol source used by the passing Devnet run. The Devnet Program ID and disposable deployer are test-only identities and must never be reused as the Mainnet identity.
+
 ## Blocking before controlled mainnet deployment
 
 1. Keep the exact-final-commit protocol CI, RustSec and verifiable build fully green.
-2. Complete a **real devnet deploy and transaction smoke** using the final instruction/Pioneer/activity-depth surface. Faucet/rate-limit failure before deployment is not passing evidence.
-3. Generate the final Program ID keypair offline. The secret keypair must never enter GitHub, CI or chat.
-4. Replace the development `declare_id!` and add matching `[programs.mainnet]` configuration using only the public Program ID.
-5. Freeze a future registration-opening UTC timestamp.
-6. Rebuild/retest the exact Program-ID/timestamp freeze commit and produce the final verifiable `.so` and SHA-256.
-7. Obtain an independent third-party audit of the exact final core plus client transaction builder, and disposition every finding.
-8. Complete `release/mainnet-release.json` with the exact commit/economics/activity/depth/Pioneer fingerprint, Program ID, registration timestamp, treasury/mints, `.so` hash, audit hash, exact CI evidence and successful devnet-smoke evidence.
-9. Approve the deliberately limited mainnet smoke plan.
-10. `python3 scripts/pre-mainnet-gate.py` must exit successfully with no blockers.
-11. Measure current mainnet deployment/rent/fee requirements and fund only the temporary deployer needed for controlled deployment.
+2. Generate the final Program ID keypair offline. The secret keypair must never enter GitHub, CI or chat.
+3. Replace the development `declare_id!` and add matching `[programs.mainnet]` configuration using only the public Program ID.
+4. Freeze a future registration-opening UTC timestamp.
+5. Rebuild/retest the exact Program-ID/timestamp freeze commit and produce the final verifiable `.so` and SHA-256.
+6. Obtain an independent third-party audit of the exact final core plus client transaction builder, and disposition every finding.
+7. Complete `release/mainnet-release.json` with the exact commit/economics/activity/depth/Pioneer fingerprint, Program ID, registration timestamp, treasury/mints, `.so` hash, audit hash, exact CI evidence and successful devnet-smoke evidence.
+8. Approve the deliberately limited mainnet smoke plan.
+9. `python3 scripts/pre-mainnet-gate.py` must exit successfully with no blockers.
+10. Measure current mainnet deployment/rent/fee requirements and fund only the temporary deployer needed for controlled deployment.
 
-Until all eleven conditions hold, deployment remains intentionally fail-closed.
+Until all ten remaining conditions hold, deployment remains intentionally fail-closed.
 
 ## Blocking before permanent immutability
 
