@@ -56,8 +56,10 @@ pub struct UserState {
     /// intentionally retained so the just-finished week's depth remains valid while
     /// rewards are pending. It is replaced only when the next ACTIVE week starts.
     pub current_week_units: u64,
+    /// Units accumulated while GRACE/INACTIVE toward the progressive requirement
+    /// for the next ACTIVE week.
     pub qualification_progress_units: u64,
-    /// Start of the current partial (<10 units) qualification window.
+    /// Start of the current partial qualification accumulation window.
     pub qualification_window_started_at: i64,
     pub lifetime_service_units: u128,
     pub next_purchase_index: u64,
