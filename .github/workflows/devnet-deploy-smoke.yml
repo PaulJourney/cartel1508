@@ -1,6 +1,11 @@
 name: devnet-deploy-smoke
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - agent/qualified-revenue-final-integration
+    paths:
+      - scripts/devnet-pre-mainnet.trigger
 permissions:
   contents: read
 jobs:
