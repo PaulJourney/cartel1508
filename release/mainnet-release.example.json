@@ -20,6 +20,7 @@
   "devnet_comprehensive_run_url": "<FINAL_SUCCESSFUL_DEVNET_COMPREHENSIVE_RUN_URL>",
   "devnet_comprehensive_evidence_sha256": "<FINAL_DEVNET_COMPREHENSIVE_EVIDENCE_SHA256>",
   "devnet_comprehensive_status": "pending",
+  "production_runtime_source_sha": "<FINAL_GIT_COMMIT_SHA>",
   "production_runtime_run_url": "<FINAL_PRODUCTION_RUNTIME_VALIDATION_RUN_URL>",
   "production_runtime_evidence_sha256": "<FINAL_PRODUCTION_RUNTIME_EVIDENCE_SHA256>",
   "production_runtime_status": "pending",
