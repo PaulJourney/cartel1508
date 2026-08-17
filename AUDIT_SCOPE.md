@@ -4,13 +4,13 @@ Status: **pre-audit**. This document defines the intended independent review tar
 
 ## Production architecture in scope
 
-The intended mainnet release is a **single immutable Solana program** plus the canonical SPL Token Program:
+The intended Mainnet release is a **single Solana program** plus the canonical SPL Token Program:
 
-`User purchase -> Service Referral Protocol -> canonical USDT/USDC vault -> accounting -> pull claim / expiry settlement`
+`buyer/claimant signer -> Service Referral Protocol -> canonical USDT/USDC accounts -> accounting -> claim / expiry settlement`
 
-A successful unit purchase is the only production economic event that creates liabilities. There is no production Revenue Evidence, Revenue Qualification or Revenue Adapter program.
+Buyer-signed `purchase_and_distribute` is the only production economic event that creates new liabilities. There is no production Revenue Evidence, Revenue Qualification, Revenue Adapter or Revenue Verifier program.
 
-### Files in the production review boundary
+### Files in the review boundary
 
 - `programs/service_referral_protocol/src/lib.rs`
 - `programs/service_referral_protocol/src/state.rs`
@@ -19,27 +19,35 @@ A successful unit purchase is the only production economic event that creates li
 - `programs/service_referral_protocol/Cargo.toml`
 - root `Cargo.toml` and `Cargo.lock`
 - `tests/reference-model.mjs`
+- `tests/rank-model.mjs` only to verify that rank metadata cannot alter payouts
 - `integration-tests/**`
 - `scripts/static-gates.py`
 - `scripts/pre-mainnet-gate.py`
-- `scripts/devnet-transaction-smoke.mjs`
+- `scripts/devnet-comprehensive-validation.mjs`
+- `scripts/devnet-security-adversarial.mjs`
+- `scripts/devnet-rpc-guard.mjs`
 - `release/mainnet-release.example.json`
 - `.github/workflows/ci.yml`
 - `.github/workflows/security-scan.yml`
 - `.github/workflows/verifiable.yml`
+- `.github/workflows/local-pre-mainnet-validation.yml`
 - `.github/workflows/devnet-deploy-smoke.yml`
+- `README.md`
+- `SECURITY.md`
 - `PROGRAM_ID_CUSTODY_RUNBOOK.md`
 - `MAINNET_FINALIZATION_RUNBOOK.md`
-- the exact frontend/client transaction builder used to construct production transactions
+- the exact frontend/client transaction builder used for production transactions
 
-## Frozen economics to verify
+Historical `scripts/migrate-*` utilities are migration history, not production runtime. Dead Revenue Adapter release tooling must not remain in the final release tree.
+
+## Frozen economics
 
 For every supported stablecoin purchase:
 
 - **1 USDT/USDC = 1 logical unit**.
-- The buyer is **SELF** and receives the 50% SELF bucket subject to activity/expiry rules.
-- The buyer's immutable direct sponsor is network U1 and receives 15% subject to activity/expiry rules.
-- Eight additional ancestors complete exactly nine network uplines using:
+- Buyer is **SELF** and receives 50% subject to activity/expiry rules.
+- Immutable direct sponsor is U1 and receives 15% subject to its own activity/depth.
+- Eight additional ancestors complete exactly nine network uplines:
   - U1 15%
   - U2 9%
   - U3 6%
@@ -49,160 +57,196 @@ For every supported stablecoin purchase:
   - U7 1.5%
   - U8 1%
   - U9 2%
-- Pioneer pool: 2%, represented by exactly 100 equal virtual positions under the purchase-earned rule below.
+- Pioneer pool: 2%.
 - Service/platform: 5%.
-- Aggregate allocation is exactly **50% + 43% + 2% + 5% = 100%** before deterministic integer-rounding handling.
-- No separate self-reentry genealogy position exists; repeated purchases are additional units of the same immutable user.
-- A tenth network ancestor must never receive value from a target purchase.
+- Aggregate allocation: **50 + 43 + 2 + 5 = 100%** before deterministic integer handling.
+- No self-reentry genealogy position exists.
+- A tenth ancestor must never receive value from a target purchase.
 
-## Frozen Pioneer position properties
+## Progressive ACTIVE / GRACE / qualification
 
-The auditor must treat the Pioneer rule as a separate global-pool mechanism, not as part of genealogy.
+ACTIVE lasts 7 days; GRACE lasts 48 hours. Claims require ACTIVE status.
 
-- Total Pioneer supply is capped absolutely at **100 positions**.
-- Registration alone assigns zero Pioneer positions.
-- A single purchase creates `floor(units / 1000)` candidate positions.
-- Purchases are non-cumulative for Pioneer qualification: e.g. `500 + 500` in separate transactions creates zero positions.
-- One wallet may own multiple Pioneer positions.
-- Actual assignment is `min(candidate_positions, 100 - positions_already_assigned)`.
-- At 98/100, a 3,000-unit purchase must create exactly 2 positions.
-- Once the protocol reaches 100/100, no future purchase can ever create another Pioneer position.
-- Only gross units in `purchase_and_distribute` qualify. SELF/network/Pioneer rewards, claims, wallet balances or other token receipts cannot create positions.
-- **Rule B is mandatory:** the purchase that creates positions must first account for its own 2% using only positions existing before that purchase. Newly created positions begin earning from the next global purchase.
-- A wallet acquiring positions at different times must not receive retroactive Pioneer value; weighted reward-debt/checkpoint arithmetic must preserve each entry point.
-- Every position is one equal share of the fixed 2%/100 schedule.
-- Value corresponding to unassigned positions is treasury-destined and must not be redistributed among existing Pioneer holders.
+The next successfully-started ACTIVE week requires:
 
-## Activity, qualification and IC-A properties
+- weeks 1–2: 10 units;
+- weeks 3–4: 20;
+- weeks 5–6: 30;
+- weeks 7–8: 40;
+- week 9 onward: 50, permanently capped.
 
-- Activity threshold is 10 units inside the qualification window.
-- ACTIVE lasts 7 days; GRACE lasts 48 hours.
-- Claims require ACTIVE status.
-- GRACE preserves unclaimed value long enough for timely requalification.
-- **IC-A is fixed-depth:** when a user is INACTIVE, that user's own scheduled/unclaimed value becomes treasury-destined; the next active ancestor does not inherit the percentage.
-- Late reactivation cannot rescue value whose grace period has already ended because stale value is settled before reactivation.
-- During a live partial qualification window, buyer-own SELF and any already-owned Pioneer entitlement are provisional so `10 x 1` unit purchases and `1 x 10` units have equivalent buyer-own economics when qualification is completed in time.
-- Small purchases that preserve activity economics must **not** accumulate toward a Pioneer position; Pioneer qualification remains per-transaction at 1,000 units.
-- Network-upline amounts are not protected by the partial-qualification exception and remain governed by IC-A.
-- If the qualification window expires without reaching 10 units, provisional buyer-own value becomes treasury-destined on the next settlement/touch.
+Required audit properties:
 
-## Purchase-path properties to review
+- the requirement advances only when a new ACTIVE week is successfully started;
+- calendar inactivity alone never advances `active_weeks_started`;
+- purchases while already ACTIVE add only to current-week personal units/depth and never prequalify the next week;
+- GRACE/INACTIVE purchases may accumulate toward the **current next requirement** inside one seven-day partial-qualification window;
+- stale partial progress resets without advancing the weekly ladder;
+- during a live INACTIVE partial-qualification window, **only buyer SELF** is provisionally preserved for batching equivalence;
+- network and Pioneer have no partial-window exception;
+- if the partial window expires before the current next requirement is reached, the preserved SELF becomes Treasury-destined on the next settlement/touch;
+- late reactivation cannot rescue value whose GRACE already expired because stale value is settled before reactivation.
 
-- `purchase_and_distribute` is the sole production economic entrypoint.
-- Payment is exactly `units * 10^6` atomic units for six-decimal USDT/USDC.
-- Unsupported mints are rejected.
-- Source-token authority must be the buyer.
-- Vault and treasury token accounts must be canonical ATAs for the expected owner/mint.
-- Buyer funds enter the canonical vault before liabilities are released from it.
-- Unit allocation, activity update, SELF/network/Pioneer accounting, Pioneer-position assignment and treasury routing are atomic in one Solana transaction.
-- Pioneer pool accrual for the current event must execute before Pioneer positions from that event are assigned.
-- Sponsor and eight ancestor account inputs must exactly match immutable ancestry.
-- Technical-root termination deterministically routes the remaining network depth to treasury.
-- Failed ancestry, token-account, arithmetic or CPI validation must roll back token movement and state.
-- Global Unit IDs are monotonic, unique and overflow-safe.
-- Large purchases cannot overflow the SPL Token `u64` payment amount.
+## Weekly network depth
 
-## Rentless purchase audit trail
+Each upline's own current ACTIVE-week personal units unlock the maximum fixed level that wallet may monetize:
 
-Purchases **must not create a persistent per-purchase PDA**.
+- 10 → U1–U3
+- 25 → U1–U4
+- 50 → U1–U5
+- 100 → U1–U6
+- 200 → U1–U7
+- 350 → U1–U8
+- 500+ → U1–U9
 
-- `UserState.next_purchase_index` provides a monotonic per-user purchase index.
-- `ProtocolState.next_unit_id` provides global logical Unit IDs.
-- Each successful purchase emits `UnitsPurchased` containing buyer, mint, purchase index, units, first Unit ID, last Unit ID, `pioneer_positions_added`, total assigned Pioneer positions and timestamp.
-- `PurchaseAndDistribute` must not require `SystemProgram` or a payer-created `UnitBatch` account.
-- The event-based history must not weaken the economic/state invariants; a failed transaction must not be treated by clients/indexers as a successful purchase.
+Required audit properties:
+
+- depth is prospective only;
+- unlocking a deeper level cannot recover a previously locked share;
+- an ACTIVE/GRACE upline lacking sufficient depth sends that scheduled amount to Treasury/unallocated;
+- an INACTIVE upline sends its scheduled amount to Treasury/expired;
+- neither case compresses the percentage to another ancestor;
+- GRACE retains the depth of the just-finished ACTIVE week while preserved pending value remains eligible.
+
+## Pioneer position properties
+
+Pioneer is a separate global pool, not genealogy.
+
+- absolute global cap: **100 positions**;
+- registration assigns zero;
+- one purchase creates `floor(units / 1000)` candidate positions;
+- separate purchases do not accumulate: `500 + 500` creates zero;
+- one wallet may own multiple/all positions;
+- actual assignment is capped by remaining slots;
+- at 98/100, a 3,000-unit purchase creates exactly two final positions;
+- at 100/100, no later purchase creates another position;
+- only gross buyer-signed purchase units qualify;
+- **Rule B:** current purchase's Pioneer accrual occurs before positions earned by that purchase are assigned;
+- weighted high-precision checkpoints prevent retroactive rewards when positions are acquired at different times;
+- each assigned position is one equal share of the fixed 2%/100 schedule;
+- unassigned virtual-slot value is Treasury-destined rather than redistributed;
+- positions remain owned through inactivity, but unclaimed Pioneer due expires once INACTIVE and cannot be rescued by reactivation.
+
+## Purchase-path integrity
+
+The auditor must verify:
+
+- `purchase_and_distribute` is the sole production economic entrypoint;
+- payment equals exactly `units * 10^6` atomic units for six-decimal supported mints;
+- zero units and purchases exceeding SPL Token `u64` payment capacity are rejected;
+- source token authority must be buyer signer;
+- unsupported mint is rejected;
+- vault accounts are canonical SPL Token ATAs for vault-authority PDA + expected mint;
+- Service-Treasury accounts are canonical ATAs for frozen Treasury + expected mint;
+- buyer `UserState` is bound to buyer signer PDA;
+- sponsor and U2–U9 account sequence is independently validated against immutable ancestry;
+- technical-root termination routes missing ancestry deterministically to Treasury;
+- buyer payment, Unit allocation, activity update, SELF/network/Pioneer accounting and Treasury routing are one atomic transaction;
+- Pioneer current-event accrual happens before new-position assignment;
+- failed ancestry/account/arithmetic/CPI validation rolls back every prior state/token mutation;
+- global Unit IDs are monotonic, unique and overflow-safe.
+
+## Registration security
+
+Required adversarial review/test coverage:
+
+- valid referrer wallet + referrer PDA must match;
+- spoofed wallet/PDA pair is rejected atomically;
+- same wallet cannot register twice because its canonical `UserState` already exists;
+- structural self-referral cannot create a `UserState` or change `real_user_count`;
+- failed registration cannot leave a partially initialized account or advance protocol counts.
+
+## Claim / settlement security
+
+- claim requires claimant signature and claimant-bound `UserState` PDA;
+- claimant must be ACTIVE;
+- claim vault must be canonical;
+- destination must be claimant's canonical ATA;
+- claimant cannot clear or redirect another user's accounting;
+- successful claim consumes only current SELF/network/Pioneer entitlement;
+- immediate repeated/double claim must fail and leave `lifetime_claimed`, balances and vault unchanged;
+- failed claim must roll back any preliminary accounting/checkpoint mutation;
+- expired value can be physically settled only once;
+- permissionless settler cannot redirect value away from the frozen Treasury.
+
+A dedicated adversarial case must also force a buyer payment CPI to fail **after** expiry settlement has begun. The entire transaction must restore old entitlement, expiry counters, purchase index, qualification/activity state, global Unit ID and token balances. The entitlement must remain settleable exactly once afterward.
 
 ## Vault and accounting properties
 
-- Vaults remain fully collateralized for all outstanding claim liabilities.
-- Treasury movements equal service + explicitly unallocated + expired + rounding + Pioneer-unassigned value.
-- USDT and USDC accounting rails cannot contaminate one another.
-- Integer rounding cannot create value, underflow or orphan liabilities.
-- Pioneer fractional carry is conserved at configured precision.
-- Weighted Pioneer checkpoints remain bounded by `global_index * wallet_positions` and cannot create retroactive or duplicated value.
-- No claimant can clear another user's accounting or redirect another user's claim.
-- Failed claims preserve accrued state atomically.
-- Expired value cannot be physically settled twice.
+- vault collateral must equal outstanding claim liabilities;
+- Treasury movement must equal service + unallocated + expired + rounding + Pioneer-unassigned flows;
+- USDT and USDC rails cannot contaminate each other;
+- integer rounding cannot create value, underflow or orphan liabilities;
+- Pioneer fractional carry is conserved at configured precision;
+- Pioneer checkpoints cannot exceed `global_index * wallet_positions`;
+- complete claim sweeps in the comprehensive scenario must close USDT and USDC vaults to zero before the separate security add-on begins;
+- the security add-on may intentionally leave a precisely asserted residual Pioneer liability caused by its additional post-saturation purchase; that residual must equal the independently computed liability and is not evidence of an accounting leak.
 
-## Gas / signer model
+## Rentless audit trail
 
-- Registration: registering user signs and pays user-state creation costs.
-- Purchase: buyer signs and pays one Solana transaction fee; **no per-purchase account rent is created**.
-- Accrual: SELF/sponsor/uplines/Pioneers require no separate transaction merely to accrue value.
-- Claim: claimant signs and pays the claim transaction fee.
-- Expiry settlement: submitting settler signs/pays; settlement cannot redirect funds away from the frozen treasury.
-- No platform-funded transaction is required per commission event.
+Purchases must not create a persistent per-purchase PDA.
 
-## Authority and immutability properties
+- `UserState.next_purchase_index` is per-user monotonic.
+- `ProtocolState.next_unit_id` is globally monotonic.
+- successful purchase emits `UnitsPurchased` with buyer, mint, purchase index, units, Unit range, Pioneer positions added/total and activity/depth fields.
+- `PurchaseAndDistribute` must not require `SystemProgram` or a payer-created batch account.
+- failed transactions must not be indexed as successful purchases.
 
-- No owner/admin instruction can mutate percentages, treasury, referral relationships, supported mints, Pioneer threshold/cap/Rule B or accounting rules after initialization.
-- Mainnet service treasury is frozen to `AepYo8xanmKuRiLVeYQuCTJoQr1nyKiTApoKwHMEg8fn`.
-- Mainnet USDT mint is frozen to `Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB`.
-- Mainnet USDC mint is frozen to `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`.
-- Production initialization remains fail-closed until final Program ID and registration-open UTC are frozen.
-- Program keypair/deploy secrets must never be committed.
-- Upgrade authority remains during controlled deploy/verification/smoke and is permanently removed only after deployed bytecode matches the reviewed artifact.
+## Authority / Mainnet configuration
+
+- no owner/admin instruction may mutate payouts, Treasury, mints, genealogy, Pioneer rules or activity/depth rules;
+- Mainnet Treasury is frozen to `AepYo8xanmKuRiLVeYQuCTJoQr1nyKiTApoKwHMEg8fn`;
+- Mainnet USDT is frozen to `Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB`;
+- Mainnet USDC is frozen to `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`;
+- production initialization must remain fail-closed until final Program ID and future registration-open UTC are frozen;
+- Program ID / deployment private keys must never be committed or uploaded to CI;
+- upgrade authority remains only through controlled deploy/verification/smoke and is permanently removed last.
 
 ## Automated evidence required before sign-off
 
-The exact release commit must have green evidence for at least:
+The appropriate exact source commits must provide green evidence for:
 
-- pinned production compile;
-- reference-model conservation tests;
+- reference economics/conservation model;
+- rank model proving rank cannot affect payouts;
 - static economic/security gates;
+- production compile;
 - Rust unit/property tests;
-- LiteSVM purchase/claim/expiry tests;
-- exact SELF 50% and U1–U9 schedule tests;
-- tenth-ancestor non-payment test;
-- ancestry/account-substitution atomic rollback;
-- ACTIVE/GRACE/INACTIVE and IC-A boundary tests;
-- split-purchase (`10 x 1`) qualification equivalence;
-- Pioneer registration consumes zero positions;
-- separate `500 + 500` purchases create zero Pioneer positions;
-- one 1,000-unit purchase creates one position;
-- one wallet can hold multiple Pioneer positions;
-- Rule B excludes newly created positions from the creating transaction;
-- 98/100 + 3,000 units creates exactly two final positions;
-- 100/100 permanently blocks additional positions;
-- weighted Pioneer accounting prevents retroactive rewards when positions are acquired at different times;
-- unsupported mint / wrong authority / noncanonical ATA rejection;
-- Unit-ID continuity/overflow tests;
-- absence of per-purchase rent accounts and presence of `UnitsPurchased` audit event;
-- RustSec dependency scan;
-- reproducible/verifiable production build + SHA-256;
-- devnet smoke using the exact final ABI and Pioneer economics.
+- LiteSVM time-boundary and adversarial tests;
+- false ancestry atomic rollback;
+- progressive ACTIVE ladder and no calendar progression;
+- full U1–U9 depth boundaries and tenth-ancestor exclusion;
+- split-purchase batching equivalence;
+- Pioneer zero-on-registration, non-cumulative threshold, Rule B, weighted positions and 100/100 cap;
+- double-claim rejection;
+- CPI rollback after expiry settlement begins;
+- comprehensive isolated Solana-validator execution using real SPL accounts/PDAs/signatures;
+- isolated runtime-security adversarial execution;
+- RustSec scan bound to exact PR head;
+- reproducible/verifiable production build and SHA-256 comparison;
+- **final public Solana Devnet comprehensive + runtime-security execution** with exact source/evidence binding;
+- **final production-runtime validation bound to the final Mainnet release SHA after Program ID/timestamp freeze**.
 
-Historical qualified-revenue/adapter evidence is not production-release evidence.
+Historical public-Devnet smoke or historical qualified-revenue/adapter evidence is supporting history only; it is not a substitute for these final gates.
 
-## Explicit blockers before mainnet approval
+## Explicit blockers before Mainnet approval
 
-- All exact-final-commit CI green.
-- Final devnet smoke green. A faucet/rate-limit failure before deployment is not protocol evidence and must remain a blocker until a real devnet execution succeeds.
-- Final Program ID generated under the custody runbook and frozen consistently.
-- Future registration-open UTC frozen.
-- Exact dependency lockfile frozen.
-- Independent audit completed against exact final commit/artifact with every finding dispositioned.
-- `release/mainnet-release.json` completed with exact commit, Program ID, artifact hash, audit hash and verified-build evidence.
-- Executable pre-mainnet gate fully green.
-- Controlled mainnet deploy and deliberately limited smoke completed while upgrade authority is retained.
-- Deployed bytecode verified against the audited artifact.
-- Upgrade authority removed only after every preceding gate passes.
+- final public Devnet comprehensive + security evidence is not `passed`;
+- final Program ID has not been generated offline and frozen;
+- registration-open UTC is not frozen to a future timestamp;
+- canonical Mainnet vault/Treasury ATA bootstrap procedure is not included and verified;
+- final production artifact has not been reproduced/hash-matched;
+- production-runtime validation is not `passed` or is not bound to the final release SHA;
+- independent audit has not completed on the exact frozen core + production transaction builder, or findings remain unresolved;
+- `release/mainnet-release.json` is incomplete;
+- executable pre-mainnet gate is not fully green;
+- Mainnet deploy bytecode has not been verified against the audited artifact before initialization;
+- controlled small Mainnet smoke has not passed;
+- deployed bytecode/state has not been reverified before permanent upgrade-authority removal.
 
 ## Out of scope unless separately commissioned
 
-- Legal/regulatory classification of the commercial/referral model.
-- Frontend visual design.
-- Marketing/business claims.
+- legal/regulatory classification of the commercial/referral model;
+- frontend visual design;
+- marketing/business claims.
 
-The transaction builder remains security-relevant because it supplies the sponsor/upline account sequence; the on-chain program must independently verify that ancestry, but the client must still be audited for deterministic, correct account construction.
-
-## Weekly activity/depth invariants added to audit scope
-
-- ACTIVE-week requirements: weeks 1-2=10, 3-4=20, 5-6=30, 7-8=40, week 9+=50.
-- Calendar inactivity must never increment the ACTIVE-week counter.
-- While ACTIVE, purchases increase current-week personal units/depth and never prequalify the next week.
-- Depth thresholds are exactly 10=>U3, 25=>U4, 50=>U5, 100=>U6, 200=>U7, 350=>U8, 500=>U9.
-- Out-of-depth scheduled network value is Treasury/unallocated, never compressed and never retroactively recoverable.
-- GRACE retains the previous ACTIVE week's depth while network value is pending.
-- Pioneer positions are permanent but Pioneer economic due is ACTIVE/GRACE-gated; INACTIVE partial qualification preserves SELF only, not Pioneer.
-- Rank/badge logic is explicitly outside the payout core and must not modify 50/43/2/5 economics.
+The production transaction builder remains security-relevant because it supplies the account sequence, even though the on-chain program must independently validate every security-critical relation.
