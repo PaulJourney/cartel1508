@@ -1,12 +1,17 @@
 name: devnet-deploy-smoke
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - agent/qualified-revenue-final-integration
+    paths:
+      - scripts/devnet-ephemeral-funding.trigger
 permissions:
   contents: read
 jobs:
   deploy-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 60
     env:
       DEVNET_DEPLOYER_KEYPAIR_JSON: ${{ secrets.DEVNET_DEPLOYER_KEYPAIR_JSON }}
     steps:
@@ -25,9 +30,12 @@ jobs:
             printf '%s' "$DEVNET_DEPLOYER_KEYPAIR_JSON" > ~/.config/solana/id.json
             chmod 600 ~/.config/solana/id.json
             echo "Using secret-backed devnet deployer keypair."
+            echo "EPHEMERAL_DEVNET_DEPLOYER=false" >> "$GITHUB_ENV"
           else
             solana-keygen new --no-bip39-passphrase --silent --force -o ~/.config/solana/id.json
-            echo "Using ephemeral devnet deployer keypair."
+            chmod 600 ~/.config/solana/id.json
+            echo "Using ephemeral devnet deployer keypair generated only for this runner."
+            echo "EPHEMERAL_DEVNET_DEPLOYER=true" >> "$GITHUB_ENV"
           fi
 
           solana-keygen new --no-bip39-passphrase --silent --force -o target/deploy/service_referral_protocol-keypair.json
@@ -36,6 +44,8 @@ jobs:
           DEPLOYER="$(solana-keygen pubkey ~/.config/solana/id.json)"
           printf '%s\n' "$PROGRAM_ID" | tee /tmp/devnet-program-id.txt
           printf '%s\n' "$DEPLOYER" | tee /tmp/devnet-deployer-pubkey.txt
+          echo "DEVNET_DEPLOYER_PUBKEY=$DEPLOYER" >> "$GITHUB_ENV"
+          echo "::notice title=Devnet deployer public address::$DEPLOYER"
 
           python3 - "$PROGRAM_ID" <<'PY'
           from pathlib import Path
@@ -63,10 +73,26 @@ jobs:
             done
           fi
 
+          if [ "$BALANCE_LAMPORTS" -lt 1000000000 ] && [ "${EPHEMERAL_DEVNET_DEPLOYER:-false}" = "true" ]; then
+            echo "Public faucet unavailable/rate-limited."
+            echo "DEVNET FUNDING REQUIRED: send at least 1 devnet SOL to ${DEVNET_DEPLOYER_PUBKEY}."
+            echo "The private key exists only on this GitHub runner and will be discarded when the job ends."
+            for attempt in $(seq 1 180); do
+              BALANCE_LAMPORTS="$(solana balance --lamports --url devnet | awk '{print $1}')"
+              if [ "$BALANCE_LAMPORTS" -ge 1000000000 ]; then
+                echo "External devnet funding detected."
+                break
+              fi
+              if [ $((attempt % 6)) -eq 0 ]; then
+                echo "Still waiting for devnet funding at ${DEVNET_DEPLOYER_PUBKEY}..."
+              fi
+              sleep 10
+            done
+          fi
+
           echo "devnet deployer balance: ${BALANCE_LAMPORTS} lamports"
           if [ "$BALANCE_LAMPORTS" -lt 1000000000 ]; then
-            echo "DEVNET FUNDING BLOCKED: public faucet unavailable/rate-limited."
-            echo "Re-run when the faucet is available, or configure GitHub secret DEVNET_DEPLOYER_KEYPAIR_JSON with a separately pre-funded disposable devnet wallet."
+            echo "DEVNET FUNDING BLOCKED: deployer did not reach 1 devnet SOL."
             exit 1
           fi
           solana balance --url devnet | tee /tmp/devnet-start-balance.txt
