@@ -1,126 +1,222 @@
 # Pre-Mainnet Definitive Validation Matrix
 
-Status: **Mainnet must remain blocked until every mandatory row below has passing evidence on source-equivalent final code, followed by exact-head CI/verifiable evidence after the Mainnet Program ID + registration timestamp freeze.**
+Status: **Mainnet remains blocked until every mandatory layer below has passing evidence on the appropriate exact source, followed by independent audit and controlled Mainnet verification.**
 
 ## Validation philosophy
 
-No test-only clock or privileged bypass is permitted in the production Solana program.
+No test-only clock, admin shortcut or privileged bypass is permitted in the production program. Validation is therefore split into complementary layers:
 
-Therefore validation is deliberately split into two complementary layers:
+1. deterministic reference/property models;
+2. **LiteSVM** using the real program bytes for time-warp and adversarial atomicity;
+3. **isolated Solana validator** for actual deployment, signatures, SPL token accounts, PDAs and end-to-end runtime transactions without public faucet/RPC constraints;
+4. **public Solana Devnet** for the final real-network comprehensive + runtime-security run;
+5. reproducible/verifiable production artifact comparison;
+6. **final production-runtime validation** after Mainnet Program ID/timestamp freeze;
+7. independent external audit of the exact frozen core and production transaction builder.
 
-1. **Real Solana Devnet** for actual signatures, transaction execution, SPL token accounts, PDA/account constraints, canonical vault/treasury routing, multi-wallet genealogy, USDT/USDC branches, rollback behavior, Pioneer checkpoints and end-to-end token conservation.
-2. **Exact-program LiteSVM** for deterministic time travel across the real 7-day ACTIVE and 48-hour GRACE windows. Devnet cannot safely warp `Clock` without changing the program under test, so time-dependent behavior must be tested with the same compiled program bytes in LiteSVM rather than adding a test backdoor.
+No single layer is treated as sufficient by itself.
 
-A passing Devnet run alone is not sufficient; a passing LiteSVM run alone is not sufficient. Both are mandatory.
+## Comprehensive runtime suite
 
-## Real Devnet comprehensive suite
+Executable: `scripts/devnet-comprehensive-validation.mjs`.
 
-Executable: `scripts/devnet-comprehensive-validation.mjs`
+It must pass on the isolated validator and again on the final public Devnet marker candidate.
+
+Mandatory coverage includes:
+
+- fresh temporary-ID deployment;
+- separate six-decimal test USDT/USDC mints;
+- canonical PDA vaults and Treasury ATAs;
+- 12-wallet genealogy: buyer + 11 ancestors;
+- prove only U1–U9 can receive network value;
+- prove U10/U11 remain outside the payout cap;
+- one-unit-below and one-unit-above all depth boundaries;
+- exact U1–U9 percentages after unlock;
+- prospective-only depth unlocking;
+- exact Treasury service + locked/unallocated + Pioneer-unassigned flows;
+- ACTIVE purchase accumulation without advancing ACTIVE week twice;
+- 1×10 versus 10×1 batching equivalence;
+- independent USDT/USDC accounting;
+- zero-unit rejection;
+- payment overflow rejection;
+- false ancestry rejection with full rollback;
+- non-canonical vault rejection;
+- unsupported mint rejection;
+- wrong source-token authority rejection;
+- failed purchase does not move funds, change accruals, Unit IDs or purchase indexes;
+- Pioneer 500+500 separate purchases = zero positions;
+- 1,000-unit single purchase = one position after Rule-B current event;
+- 2,000-unit purchase = two positions;
+- multiple Pioneer wallets;
+- weighted checkpoint entry at different indexes;
+- exact multi-wallet Pioneer claim amounts;
+- 98→100 saturation with excess candidates truncated;
+- post-100 purchase creates zero positions;
+- fully assigned pool creates no further unassigned Pioneer flow;
+- complete active claim sweep;
+- comprehensive-phase canonical USDT vault = zero;
+- comprehensive-phase canonical USDC vault = zero;
+- exact `real_user_count`;
+- `next_unit_id = 1 + sum(successful units)`;
+- each `next_purchase_index` equals successful purchases for that wallet;
+- end-to-end token conservation.
+
+Sentinel:
+
+`DEVNET PRE-MAINNET COMPREHENSIVE VALIDATION: PASS`
+
+## Runtime-security adversarial suite
+
+Executable: `scripts/devnet-security-adversarial.mjs`.
+
+It runs **after** the comprehensive suite on the same deployment and must pass on both isolated runtime and final public Devnet.
 
 Mandatory coverage:
 
-- initialize a fresh temporary-ID deployment;
-- create separate 6-decimal test USDT and USDC mints;
-- create canonical PDA vaults and treasury ATAs;
-- register a real 12-wallet genealogy: buyer + 11 ancestors;
-- prove only U1-U9 can ever receive network value; U10/U11 remain outside the cap;
-- set U4-U9 one unit below every depth boundary (24/49/99/199/349/499) and prove only U1-U3 receive the target purchase;
-- add exactly one unit to cross all six boundaries and prove the next target purchase pays exact U1-U9 percentages;
-- prove depth unlock is prospective and earlier locked value is not recovered;
-- prove Treasury receives exactly service + locked/unallocated + unassigned Pioneer flow;
-- prove ACTIVE purchases accumulate `current_week_units` without incrementing `active_weeks_started` again;
-- prove `1 x 10` and `10 x 1` qualification produce equivalent SELF/ACTIVE state;
-- prove USDT and USDC accrual/claim accounting is isolated per mint;
-- reject zero-unit purchases;
-- reject token-payment overflow / `PurchaseTooLarge` before transfer;
-- reject tampered ancestry accounts and prove full transaction rollback;
-- reject non-canonical vault accounts;
-- reject unsupported mints;
-- reject token accounts owned by the wrong wallet;
-- prove failed purchases do not transfer funds, mutate network accruals, advance Unit IDs or increment purchase indexes;
-- prove 500 + 500 separate purchases create zero Pioneer positions;
-- prove one 1,000-unit purchase creates one Pioneer position only after its own Pioneer event (Rule B);
-- prove a 2,000-unit purchase creates two positions;
-- prove multiple wallets can own Pioneer positions simultaneously;
-- prove weighted checkpoints when one wallet adds positions at different indexes;
-- prove exact multi-wallet Pioneer claim amounts;
-- prove 4 assigned positions -> 98 -> exactly 100 with a purchase that has more candidates than remaining slots;
-- prove 100/100 is permanent and a later 5,000-unit purchase creates zero positions;
-- prove fully assigned Pioneer pool creates no further unassigned Pioneer flow;
-- perform complete active claim sweep;
-- require both canonical stablecoin vaults to finish at zero liability after sweep;
-- require `real_user_count` to equal actual registrations;
-- require `next_unit_id = 1 + sum(all successful purchase units)`;
-- require every `next_purchase_index` to equal the wallet's number of successful purchases;
-- require end-to-end token conservation for test USDT, USDC and rejected unsupported mint.
+- valid registration changes `real_user_count` exactly once;
+- same-wallet re-registration is rejected atomically;
+- spoofed referrer wallet/PDA pair is rejected without creating `UserState`;
+- structural self-referral is rejected without creating `UserState`;
+- non-canonical Service-Treasury ATA is rejected;
+- failed Treasury substitution does not change buyer source, canonical Treasury, fake Treasury, vault, Unit ID or purchase index;
+- a valid purchase succeeds immediately after the failed substitution;
+- claim hijack using another wallet's `UserState` is rejected;
+- claimant cannot redirect claim to another wallet's ATA;
+- failed claims cannot clear SELF or alter `lifetime_claimed`/balances/vault;
+- valid claim succeeds with exact expected payout;
+- immediate second claim/replay is rejected with state/balances unchanged;
+- fake Treasury receives zero value.
 
-The suite terminates successfully only when it prints:
+Because this suite adds another valid purchase **after** the comprehensive phase already saturated Pioneer 100/100 and closed both vaults, it intentionally leaves the exact Pioneer liability generated by that extra purchase. The current expected residual is `200000` USDC atoms (0.2 USDC); it must be asserted precisely rather than mistaken for a leak.
 
-`DEVNET PRE-MAINNET COMPREHENSIVE VALIDATION: PASS`
+Sentinel:
+
+`DEVNET SECURITY ADVERSARIAL VALIDATION: PASS`
 
 ## Exact-time LiteSVM suite
 
 Mandatory coverage in `integration-tests/**`:
 
 - progressive ACTIVE ladder `10,10,20,20,30,30,40,40,50...`;
-- week counter advances only on successfully-started ACTIVE cycles;
-- long calendar inactivity alone never advances the requirement;
-- purchases while ACTIVE increase current-week volume/depth and do not prequalify another week;
+- counter advances only on successfully-started ACTIVE cycles;
+- long calendar inactivity does not advance requirement;
+- ACTIVE purchases raise weekly volume/depth only;
 - partial qualification below requirement remains INACTIVE;
-- stale partial qualification windows reset;
-- ACTIVE lasts the real seven-day duration;
-- GRACE lasts the real 48-hour duration;
-- claim is ACTIVE-only;
-- GRACE preserves eligible SELF/network due but does not permit claim;
-- expired SELF/network value is permissionlessly settleable once and only once;
-- late reactivation cannot rescue expired value;
+- stale partial windows reset;
+- exact seven-day ACTIVE and 48-hour GRACE durations;
+- ACTIVE-only claim;
+- GRACE preserves eligible due but does not permit claim;
+- expired SELF/network value settles once only;
+- late reactivation cannot rescue expired history;
 - Pioneer positions remain permanently owned through inactivity;
-- inactive Pioneer due expires to Treasury;
-- late reactivation cannot recover historical Pioneer due;
-- permanent Pioneer positions resume earning only prospectively after reactivation;
-- exact status boundaries: `active_until` is still ACTIVE, `active_until + 1` is GRACE, `grace_until` is still GRACE, `grace_until + 1` is INACTIVE;
-- zero/uninitialized deadlines never create accidental ACTIVE/GRACE status.
+- inactive Pioneer due expires;
+- reactivation cannot recover historical Pioneer due;
+- positions resume prospectively;
+- exact boundary semantics at `active_until`, `+1`, `grace_until`, `+1`;
+- zero deadlines never create accidental eligibility.
 
-Dedicated exact-boundary test: `integration-tests/tests/activity_status_boundaries.rs`.
+Dedicated exact boundary file: `integration-tests/tests/activity_status_boundaries.rs`.
 
-## Existing deterministic / adversarial suite
+## Deterministic / adversarial test inventory
 
-The final gate also requires all existing tests to remain green, including:
+All existing tests must remain green, including:
 
 - `purchase_distribution.rs`;
 - `deep_network.rs`;
 - `progressive_activity.rs`;
 - `grace_expiry.rs`;
-- `claim_activity.rs`;
+- `claim_activity.rs` including explicit double-claim rejection;
+- `claim_security.rs`;
 - `pioneer_positions.rs`;
 - `pioneer_activity.rs`;
 - `batching_equivalence.rs`;
 - `ancestry_rollback.rs`;
 - `initialization_security.rs`;
+- `cpi_atomic_rollback.rs` proving complete rollback when payment CPI fails after expiry settlement begins;
 - reference economic model;
 - rank/badge model;
-- static security/economic gates;
-- Rust unit/property tests including large randomized split-conservation and Unit-ID range checks;
-- RustSec dependency scan;
-- protocol production build;
-- independent verifiable build;
-- byte-identical `.so` comparison / SHA-256 evidence.
+- static gates;
+- Rust unit/property tests including randomized conservation and Unit-ID ranges.
+
+## Exact-head CI / security / artifact evidence
+
+Every release-relevant PR head, including the final marker-only Devnet commit, must receive:
+
+- protocol CI PASS;
+- RustSec PASS;
+- local comprehensive + runtime-security PASS;
+- verifiable-build PASS.
+
+The production `.so` produced by normal protocol CI and the independent verifiable build must be compared byte-for-byte and have the same SHA-256.
+
+RustSec is intentionally configured without a `paths` filter so a marker/documentation-only final head cannot reuse a scan from a different SHA.
+
+## Final public Devnet evidence
+
+The final public run occurs only after all free/local tests are green to avoid wasting faucet capacity.
+
+The workflow must:
+
+- checkout/record exact marker SHA;
+- generate only disposable Devnet identities;
+- substitute the temporary Program ID only in `Anchor.toml` and `lib.rs`;
+- fail if another tracked source file changes during that runtime substitution;
+- record temporary `.so` hash, Program ID, deploy output and public deployer address;
+- execute comprehensive suite;
+- execute runtime-security suite;
+- publish only non-secret evidence.
+
+The release manifest records:
+
+- `devnet_comprehensive_source_sha`;
+- run URL;
+- evidence SHA-256;
+- `devnet_comprehensive_status: "passed"`.
+
+Historical smoke evidence does not satisfy this row.
+
+## Final production-runtime validation
+
+After final Mainnet Program ID and future registration-open timestamp are frozen, the exact `production` artifact must be executed in a production-compatible local/runtime environment without adding a program bypass.
+
+The production branch of initialization pins:
+
+- Service Treasury;
+- Mainnet USDT;
+- Mainnet USDC;
+- frozen registration-open timestamp.
+
+Therefore final production-runtime evidence is separate from development-equivalent Devnet/local evidence.
+
+The release manifest requires:
+
+- `production_runtime_source_sha` equal to final `commit_sha`;
+- production-runtime run URL;
+- evidence SHA-256;
+- `production_runtime_status: "passed"`.
+
+## External audit
+
+Internal validation PASS means the implementation passed the project's engineering battery. It does **not** replace independent audit.
+
+The auditor reviews the exact final core, dependency lock, final production artifact and exact production transaction builder. Every finding must be dispositioned and fixed findings re-tested. The final audit-report SHA-256 is recorded in the release manifest.
 
 ## Release decision
 
-A comprehensive validation PASS means the implementation has passed the project's internal pre-mainnet engineering battery. It does **not** replace the independent external audit.
-
 Mainnet remains blocked until:
 
-1. comprehensive real Devnet PASS;
-2. exact-time/adversarial LiteSVM PASS;
-3. protocol CI + RustSec + verifiable build PASS;
-4. final Mainnet Program ID generated offline and only public ID committed;
-5. future registration-open UTC timestamp frozen;
-6. exact freeze commit rebuilt/retested and `.so` hash frozen;
-7. independent third-party audit completed and findings dispositioned;
-8. executable release manifest/gate fully green;
-9. deployed Mainnet bytecode verified before initialization;
-10. deliberately small Mainnet smoke passes with temporary upgrade authority;
-11. deployed state/bytecode reverified;
-12. upgrade authority removed only as the final irreversible action.
+1. all deterministic/LiteSVM tests PASS;
+2. isolated comprehensive + runtime-security PASS;
+3. exact-head protocol CI + RustSec + verifiable build PASS;
+4. final public Devnet comprehensive + security PASS on exact marker SHA;
+5. final Program ID generated offline and only public key committed;
+6. future registration-open UTC frozen;
+7. canonical vault/Treasury ATA bootstrap procedure frozen;
+8. exact freeze commit production artifact reproduced/hash-matched;
+9. final production-runtime validation PASS on final release SHA;
+10. independent audit completed and findings dispositioned;
+11. `release/mainnet-release.json` complete and executable gate green;
+12. deployed Mainnet bytecode verified before initialization;
+13. small Mainnet smoke PASS with temporary upgrade authority;
+14. deployed state/bytecode reverified;
+15. upgrade authority removed only as the final irreversible action.
