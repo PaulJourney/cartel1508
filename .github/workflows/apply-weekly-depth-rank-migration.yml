@@ -30,8 +30,15 @@ jobs:
           PY
       - name: Apply frozen weekly activity/depth migration
         run: python3 scripts/apply-weekly-depth-rank-migration.py
-      - name: Format Rust
-        run: cargo fmt --all
+      - name: Format and normalize
+        run: |
+          cargo fmt --all
+          python3 - <<'PY'
+          from pathlib import Path
+          for name in ['README.md', 'AUDIT_SCOPE.md', 'AUDIT_HANDOFF.md']:
+              p = Path(name)
+              p.write_text(p.read_text().rstrip() + '\n')
+          PY
       - name: Commit migration result
         run: |
           rm -f scripts/retry-weekly-depth-migration.marker
