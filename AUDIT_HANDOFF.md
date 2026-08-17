@@ -1,35 +1,25 @@
 # Independent Audit Handoff — Service Referral Protocol
 
-Status: **PRE-AUDIT / NOT YET A PRODUCTION SIGN-OFF**.
+Status: **PRE-AUDIT / NOT A PRODUCTION SIGN-OFF**.
 
-This handoff is intentionally prepared before the final Program ID and registration timestamp are frozen. The auditor must receive an exact immutable review package only after the remaining freeze fields below are completed.
+This handoff is prepared before the final Mainnet Program ID and registration timestamp are frozen. The independent auditor must review the **exact final freeze commit and exact final production artifact**, not an earlier green development/Devnet candidate.
 
 ## Review target
 
 Repository: `PaulJourney/cartel1508`
 
-Release branch / PR under hardening:
-
 - branch: `agent/qualified-revenue-final-integration`
-- PR: `#4`
-- architecture: one Solana/Anchor program plus canonical SPL Token Program
-- production economic event: `purchase_and_distribute`
+- PR: `#4` (draft until release gates are complete)
+- production architecture: one Solana/Anchor program plus canonical SPL Token Program
+- sole production economic event: buyer-signed `purchase_and_distribute`
 
-The auditor must review the **exact final freeze commit**, not an earlier green development or Devnet commit.
+There is no production Revenue Verifier / Revenue Adapter / qualified-revenue chain in the final architecture.
 
-## Frozen business/economic semantics
-
-### Purchase and units
+## Frozen economics
 
 - 1 USDT/USDC = 1 logical unit.
-- Purchases are unlimited subject to numeric/transaction limits.
-- Each buyer-signed purchase transfers the full gross amount into the canonical vault and atomically performs all accounting.
-- Purchase path is rentless: there is no persistent per-purchase `UnitBatch` PDA.
-
-### SELF + nine uplines
-
-- SELF / buyer: 50%.
-- U1 / immutable direct sponsor: 15%.
+- SELF/buyer: 50%.
+- U1 direct sponsor: 15%.
 - U2: 9%.
 - U3: 6%.
 - U4: 4%.
@@ -38,157 +28,210 @@ The auditor must review the **exact final freeze commit**, not an earlier green 
 - U7: 1.5%.
 - U8: 1%.
 - U9: 2%.
-- Pioneer pool: 2%.
-- Service/platform: 5%.
-- Total: 100% before deterministic integer rounding.
+- Pioneer: 2%.
+- Service: 5%.
+- Total: 100% before deterministic integer handling.
 - No dynamic compression.
 - No separate self-reentry genealogy position.
+- Purchases are rentless from the protocol perspective: no persistent per-purchase PDA.
 
-### Progressive activity / IC-A / weekly depth
+## Progressive activity / depth / IC-A
 
 - ACTIVE: 7 days.
 - GRACE: 48 hours.
-- Successful ACTIVE weeks 1–2 require 10 units each.
-- Weeks 3–4 require 20 each.
-- Weeks 5–6 require 30 each.
-- Weeks 7–8 require 40 each.
-- Week 9 onward requires 50, permanently capped at 50.
-- Calendar inactivity does not advance the requirement; only successfully-started ACTIVE weeks do.
-- Purchases while already ACTIVE increase `current_week_units` and current depth only; they never prequalify the next week.
-- During GRACE/INACTIVE, partial purchases may accumulate toward the next ACTIVE requirement within one live seven-day qualification window.
-- During an INACTIVE live partial qualification window, only buyer-own SELF is provisionally preserved; Pioneer and network receive no inactive partial-window exception.
+- successful ACTIVE weeks 1–2: 10 units each;
+- weeks 3–4: 20;
+- weeks 5–6: 30;
+- weeks 7–8: 40;
+- week 9 onward: 50 cap.
+- Calendar inactivity does not advance the requirement.
+- Purchases while ACTIVE increase `current_week_units`/depth only and never prequalify the next week.
+- GRACE/INACTIVE partial purchases accumulate toward the current next requirement inside one seven-day window.
+- During an INACTIVE live partial window, **SELF only** is provisional. Pioneer/network have no partial exception.
 - Claims are ACTIVE-only.
-- INACTIVE scheduled/unclaimed value becomes treasury-destined under IC-A.
-- An inactive upline's share is not reassigned to another ancestor.
+- INACTIVE unclaimed SELF/network/Pioneer value becomes permanently Treasury-destined.
 - Stale value is settled before late reactivation.
-- Weekly personal units unlock maximum monetizable depth prospectively: 10=>U3, 25=>U4, 50=>U5, 100=>U6, 200=>U7, 350=>U8, 500=>U9.
-- ACTIVE/GRACE scheduled levels beyond unlocked depth route to Treasury/unallocated and are never recovered retroactively or compressed upward.
-- GRACE retains the just-finished ACTIVE week's depth until reactivation/expiry settlement; the next ACTIVE week resets `current_week_units` to the new qualifying purchase volume.
 
-## Frozen Pioneer position semantics
+Each upline's own weekly personal units unlock its maximum monetizable level prospectively:
 
-The old first-100-registration Pioneer model is retired.
+- 10 → U1–U3
+- 25 → U1–U4
+- 50 → U1–U5
+- 100 → U1–U6
+- 200 → U1–U7
+- 350 → U1–U8
+- 500+ → U1–U9
 
-- Exactly 100 Pioneer positions exist at most.
-- Registration creates zero Pioneer positions.
-- A single purchase creates `floor(units / 1000)` candidate positions.
-- Purchases do not accumulate across transactions for Pioneer qualification.
-- One wallet may own multiple positions.
-- Actual assignment is capped by the remaining global capacity.
-- 98/100 + a single 3,000-unit purchase creates exactly 2 positions.
-- Once 100/100 is reached, every later purchase creates zero positions regardless of size.
-- SELF rewards, network/downline rewards, Pioneer rewards, claims and wallet balances cannot directly create Pioneer positions.
-- **Rule B:** the purchase that creates positions accounts for its own 2% before the new positions are assigned. New positions earn only from the next global purchase.
-- Weighted per-wallet checkpoints/reward debt prevent retroactive rewards when one wallet acquires positions at different times.
-- Every position is an equal virtual share of the fixed 2%/100 pool.
-- Unassigned Pioneer shares go to Treasury and are never redistributed among existing positions.
-- Positions themselves are permanent and never recycled.
-- Pioneer economics are activity-gated: ACTIVE participates/claims, GRACE preserves eligible due, INACTIVE due expires to Treasury on settlement, and late reactivation cannot recover expired history.
+Locked ACTIVE/GRACE levels route to Treasury/unallocated. INACTIVE levels route to Treasury/expired. Neither is compressed or recovered retroactively.
 
-## Primary source files
+## Pioneer semantics
 
-Audit at minimum:
+- absolute cap: 100 positions;
+- registration: zero positions;
+- one purchase creates `floor(units / 1000)` candidates;
+- separate purchases do not accumulate (`500 + 500 = 0`);
+- one wallet may own multiple/all positions;
+- assignment is capped by remaining capacity;
+- 98/100 + one 3,000-unit purchase = exactly 2 positions;
+- 100/100 permanently blocks position 101;
+- **Rule B:** creating purchase accrues Pioneer using only pre-existing positions; new positions earn from the next purchase;
+- weighted high-precision checkpoints prevent retroactive entitlement;
+- unassigned virtual-slot value goes to Treasury;
+- positions are permanent, but INACTIVE unclaimed due expires and cannot be rescued by reactivation.
 
-- `programs/service_referral_protocol/src/lib.rs`
-- `programs/service_referral_protocol/src/state.rs`
-- `programs/service_referral_protocol/src/math.rs`
-- `programs/service_referral_protocol/src/constants.rs`
+## Primary audit source
+
+Review at minimum:
+
+- `programs/service_referral_protocol/src/{lib,state,math,constants}.rs`
 - `programs/service_referral_protocol/Cargo.toml`
 - root `Cargo.toml` / `Cargo.lock`
 - `tests/reference-model.mjs`
+- `tests/rank-model.mjs`
 - `integration-tests/**`
 - `scripts/static-gates.py`
 - `scripts/pre-mainnet-gate.py`
-- `scripts/devnet-transaction-smoke.mjs`
-- `offchain/rank-engine.mjs`
-- `tests/rank-model.mjs`
-- `release/mainnet-release.example.json`
+- `scripts/devnet-comprehensive-validation.mjs`
+- `scripts/devnet-security-adversarial.mjs`
+- `scripts/devnet-rpc-guard.mjs`
+- `offchain/rank-engine.mjs` only for rank/indexer isolation review
 - `.github/workflows/ci.yml`
 - `.github/workflows/security-scan.yml`
 - `.github/workflows/verifiable.yml`
+- `.github/workflows/local-pre-mainnet-validation.yml`
 - `.github/workflows/devnet-deploy-smoke.yml`
+- `release/mainnet-release.example.json`
+- `README.md`
+- `SECURITY.md`
+- `AUDIT_SCOPE.md`
 - `RANK_BADGE_SPEC.md`
 - `PROGRAM_ID_CUSTODY_RUNBOOK.md`
 - `MAINNET_FINALIZATION_RUNBOOK.md`
-- the exact production transaction-builder/client source used to supply sponsor and upline accounts.
+- exact production transaction-builder/client source.
 
-See `AUDIT_SCOPE.md` for the detailed review properties.
+Historical migration scripts are outside runtime. Dead Revenue Adapter release tooling is removed rather than treated as a dependency.
 
-## Automated evidence expected on the exact audit-freeze commit
+## Deterministic / LiteSVM evidence expected
 
-The handoff is incomplete unless the exact final freeze source has successful evidence for:
+The exact audited freeze must preserve green evidence for:
 
-- reference economic model;
-- rank/badge model isolation from payouts;
+- reference conservation model;
+- rank isolation from payouts;
 - static security/economic gates;
-- fail-closed pre-mainnet proof before final release fields are populated;
 - production compile;
-- production SBF build;
 - Rust unit/property tests;
-- LiteSVM integration/adversarial suite;
-- RustSec scan;
-- verifiable build;
-- `.so` SHA-256;
-- retained successful real Devnet deploy + transaction-smoke evidence for the final ABI/economic surface.
+- exact ACTIVE/GRACE/INACTIVE boundary tests;
+- progressive `10,10,20,20,30,30,40,40,50...` ladder;
+- no calendar progression;
+- full U1–U9 depth thresholds and tenth-ancestor exclusion;
+- prospective locked-level Treasury routing;
+- batching equivalence;
+- Pioneer zero-on-registration, non-cumulative threshold, Rule B, weighted checkpoints and hard 100 cap;
+- Pioneer inactivity expiry without position deletion;
+- false ancestry rollback;
+- initialization duplicate/non-six-decimal mint rejection;
+- immediate double-claim/replay rejection;
+- failed payment CPI **after expiry settlement begins** rolls the entire transaction back and leaves the entitlement settleable exactly once.
 
-Pioneer test evidence must explicitly cover:
+## Isolated Solana-validator evidence
 
-- registration = 0 positions;
-- 500 + 500 separate purchases = 0 positions;
-- 1,000 single purchase = 1 position;
-- multiple positions per wallet;
-- Rule B;
-- weighted checkpoints;
-- 98/100 + 3,000 = 2 positions;
-- 100/100 saturation prevents position 101;
-- inactivity expires eligible Pioneer economics without deleting the permanent position;
-- later reactivation does not recover expired Pioneer history.
+The comprehensive local runtime is not a mock-only model: it builds/deploys the program to `solana-test-validator` and uses signed transactions, real SPL Token accounts and PDAs.
 
-Progressive activity/depth evidence must explicitly cover:
+A completed validation run on exact source `87affea4348c7d62017695684e388b32fedd9dba` proved the newly added runtime-security suite in addition to the comprehensive economics:
 
-- `10,10,20,20,30,30,40,40,50...` successful ACTIVE-week requirements;
-- long calendar inactivity does not advance the requirement;
-- partial requalification below threshold remains INACTIVE;
-- purchases while ACTIVE raise current depth without starting another week;
-- 10 personal weekly units monetize only U1–U3;
-- 500 personal weekly units monetize U1–U9;
-- unlocking is prospective and locked levels route Treasury/unallocated.
+### Comprehensive phase
 
-## Real Devnet evidence — PASSED
+- **20 users**;
+- **108,595 logical units**;
+- U1–U9 depth boundary scenarios;
+- 1×10 vs 10×1 batching;
+- independent USDT/USDC paths;
+- adversarial zero/overflow/ancestry/vault/mint/authority rejection;
+- Pioneer non-cumulative acquisition, weighted checkpoints, Rule B and 98→100 cap;
+- final `nextUnitId = 108596`;
+- final Pioneer assigned = `100`;
+- comprehensive-phase USDT vault = `0`;
+- comprehensive-phase USDC vault = `0`.
 
-The maintained Devnet smoke successfully deployed and executed the final ABI/economic transaction path on source head `866e724e5ae57ec9eb20f641d9272ce508554a6a`.
+### Runtime-security add-on
 
-- GitHub Actions run: `32039983574` — **PASS**;
-- temporary Devnet Program ID: `9EWUPLXeyTJhW3idnWFUDP9xfBUAensW42kLYKiG55oM`;
-- deployment transaction: `643FxLkJ1mtKtd8Kh87QRFu481EC5nsWF2h76ctHjE47GFsrgLw3fL8QxWWnYQFJ1qs8iCYdLFF4kLtSf2CBcBLP`;
-- evidence artifact ID: `9291863971`;
-- artifact digest: `sha256:1c63cecb2df7330d3ead7ec0ee872d828c595f138599c16ee9aeef9b524b7254`;
-- smoke sentinel: `DEVNET TRANSACTION SMOKE: PASS`;
-- Pioneer assignment reached exactly 100/100 and could not create position 101;
-- final vault atomic balance was `0`;
-- final sponsor atomic amount: `15920000000`;
-- final buyer atomic amount: `53208800000`;
-- final Treasury atomic amount: `36981200000`.
+The same deployment then proved:
 
-Subsequent repository cleanup only removed the temporary funding trigger and restored the normal manual-only Devnet workflow; protocol source was unchanged. The disposable Devnet Program ID and deployer must never be treated as production identities.
+- same-wallet re-registration rejected;
+- spoofed referrer wallet/PDA rejected;
+- structural self-referral rejected;
+- non-canonical Service-Treasury ATA rejected without moving value or advancing Unit/purchase indices;
+- valid 10-unit purchase succeeds after the failed substitution;
+- claim hijack using another wallet's `UserState` rejected;
+- non-canonical claim destination rejected;
+- valid buyer claim pays exactly 5 USDC SELF;
+- immediate double-claim/replay rejected;
+- fake Treasury receives `0`;
+- only two valid security registrations changed `realUserCount` (`20 -> 22`);
+- deliberate security add-on residual vault liability = exactly `200000` USDC atoms (0.2 USDC), independently expected as Pioneer liability from the added post-saturation purchase.
 
-## Final freeze fields that must be supplied before audit sign-off
+Run: `32053522367` — **PASS**.
+Evidence artifact: `9295679641`.
+Artifact package digest: `sha256:d4dfa650fb44b194e1349cf070edfbf1c77152768223b459a02b739afeaf3f7d`.
 
-The final review package must record:
+The 0.2-USDC final residual in this add-on is expected and asserted. It does not contradict the comprehensive-phase zero-vault invariant; it is liability created by a subsequent test purchase after the original Pioneer-owner keys have left the first Node process.
 
-- exact final git commit SHA;
+## Public Solana Devnet status
+
+### Historical smoke — PASS, supporting evidence only
+
+A real public-Devnet smoke on source-equivalent core head `866e724e5ae57ec9eb20f641d9272ce508554a6a` successfully deployed and exercised the core ABI/economics:
+
+- run `32039983574` — PASS;
+- temporary Program ID `9EWUPLXeyTJhW3idnWFUDP9xfBUAensW42kLYKiG55oM`;
+- deployment transaction `643FxLkJ1mtKtd8Kh87QRFu481EC5nsWF2h76ctHjE47GFsrgLw3fL8QxWWnYQFJ1qs8iCYdLFF4kLtSf2CBcBLP`;
+- evidence artifact `9291863971`;
+- artifact digest `sha256:1c63cecb2df7330d3ead7ec0ee872d828c595f138599c16ee9aeef9b524b7254`;
+- Pioneer reached 100/100 and position 101 was blocked;
+- final smoke vault = 0.
+
+This remains useful history but is **not the final public-Devnet release gate**.
+
+### Final public comprehensive — PENDING / release blocker
+
+The maintained public workflow must run once on the final marker SHA after all free/local hardening is green. That run must execute both:
+
+1. `devnet:pre-mainnet` comprehensive validation;
+2. `devnet:security` runtime adversarial validation.
+
+The workflow records exact source SHA, allows only temporary Program-ID substitution in `Anchor.toml` and `lib.rs`, records the temporary `.so` hash, Program ID, deployment evidence and both validation outputs, and never publishes the private deployer key.
+
+The final public Devnet source SHA, run URL and evidence digest must be recorded in the release manifest. A faucet/RPC failure before successful execution is not protocol evidence and does not satisfy the gate.
+
+## Final production-runtime evidence — PENDING / release blocker
+
+After the final Mainnet Program ID and future registration timestamp are frozen, the exact `production` artifact must receive a runtime validation bound to the **final release source SHA**. This is separate from development-equivalent local/Devnet evidence because production initialization pins the final Treasury/mints/timestamp.
+
+The release manifest requires:
+
+- `production_runtime_source_sha` equal to final `commit_sha`;
+- successful run URL;
+- evidence SHA-256;
+- `production_runtime_status: "passed"`.
+
+## Final freeze fields required before auditor sign-off
+
+The final handoff package must record:
+
+- exact final git SHA;
 - final public Program ID generated offline;
-- frozen future `MAINNET_REGISTRATION_OPEN_AT` UTC timestamp;
+- future `MAINNET_REGISTRATION_OPEN_AT` UTC timestamp;
 - exact `Cargo.lock`;
 - final IDL;
-- exact production/verifiable `.so` SHA-256;
-- exact protocol-CI run URL;
-- exact RustSec run URL;
-- exact verified-build run URL;
-- successful Devnet-smoke run URL and evidence digest;
+- final production/verifiable `.so` SHA-256;
+- protocol-CI run URL;
+- RustSec run URL;
+- verified-build run URL;
+- final public-Devnet comprehensive source SHA/run/evidence digest;
+- final production-runtime source SHA/run/evidence digest;
 - exact transaction-builder source/version.
 
-No Program ID private key, deployer private key, seed phrase or recovery material belongs in this package.
+No private key, seed phrase or recovery material belongs in this package.
 
 ## Audit output requirements
 
@@ -199,29 +242,26 @@ For every finding record:
 - exploit/precondition;
 - economic/security impact;
 - recommended remediation;
-- project disposition: fixed / accepted / rejected with rationale;
-- remediation commit SHA where applicable;
+- disposition: fixed / accepted / rejected with rationale;
+- remediation commit SHA;
 - re-test evidence.
 
-The final audit report itself must be hashed with SHA-256 and that digest must be placed in `release/mainnet-release.json` with `audit_status: "passed"` only after all accepted findings are resolved.
+Hash the final independent audit report with SHA-256. Set `audit_status: "passed"` in the release manifest only after accepted findings are resolved/retested.
 
-## Immutability gate
+## Mainnet / immutability sequence
 
-Audit approval is not permission to immediately remove upgrade authority.
+Audit approval is not permission to immediately make the program immutable.
 
-The sequence remains:
+Required order:
 
-1. audit exact artifact;
+1. audit exact frozen artifact;
 2. complete release manifest and executable gate;
-3. controlled mainnet deploy with temporary upgrade authority;
-4. verify deployed bytecode against audited `.so`;
-5. initialize with frozen inputs;
-6. deliberately small mainnet smoke;
-7. verify balances/state/bytecode again;
-8. only then permanently remove upgrade authority.
+3. deploy Mainnet with temporary upgrade authority;
+4. verify deployed bytecode equals audited `.so` **before initialization**;
+5. initialize only frozen values;
+6. create if absent and verify canonical USDT/USDC ATAs for vault-authority PDA and Service Treasury;
+7. deliberately small Mainnet smoke that does not consume Pioneer positions;
+8. reverify balances/state/bytecode;
+9. only then permanently remove upgrade authority.
 
-After permanent authority removal there is no upgrade or rollback path.
-
-## New frozen behavior for review
-
-Review progressive ACTIVE-week qualification, prospective weekly U1-U9 depth, Treasury routing of locked levels, strict Pioneer ACTIVE/GRACE gating and event/indexer determinism. `RANK_BADGE_SPEC.md` is an indexer/UI specification only and must not be treated as an additional on-chain payout surface.
+After permanent authority removal, there is no software rollback path.
