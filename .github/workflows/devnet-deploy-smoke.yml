@@ -1,9 +1,7 @@
 name: devnet-deploy-smoke
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - agent/qualified-revenue-final-integration
+  pull_request:
     paths:
       - scripts/devnet-pre-mainnet.trigger
 permissions:
@@ -17,11 +15,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Verify exact source head
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          printf '%s\n' "$GITHUB_SHA" | tee /tmp/devnet-source-head.txt
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          printf '%s\n' "$EXPECTED_HEAD_SHA" | tee /tmp/devnet-source-head.txt
       - uses: solana-foundation/github-actions/setup-all@v0.2.15
         with:
           solana_version: '3.1.10'
