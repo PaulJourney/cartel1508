@@ -8,6 +8,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const MIN_INTERVAL_MS = Number(process.env.DEVNET_RPC_MIN_INTERVAL_MS || 450);
 const MAX_RETRIES = Number(process.env.DEVNET_RPC_MAX_RETRIES || 9);
 const NULL_ACCOUNT_RETRIES = Number(process.env.DEVNET_NULL_ACCOUNT_RETRIES || 4);
+const BLOCKHASH_RETRIES = Number(process.env.DEVNET_BLOCKHASH_RETRIES || 5);
 
 let queue = Promise.resolve();
 let nextRequestAt = 0;
@@ -37,6 +38,18 @@ async function isTransientNullAccount(response, method) {
   }
 }
 
+async function isTransientBlockhashError(response, method) {
+  if (method !== "sendTransaction" || response.status !== 200) return false;
+  try {
+    const payload = await response.clone().json();
+    const message = String(payload?.error?.message || "");
+    const dataMessage = String(payload?.error?.data?.err || "");
+    return /blockhash not found/i.test(`${message} ${dataMessage}`);
+  } catch {
+    return false;
+  }
+}
+
 globalThis.fetch = async function guardedDevnetFetch(input, init) {
   if (!isGuardedRpc(input)) {
     return nativeFetch(input, init);
@@ -55,6 +68,7 @@ globalThis.fetch = async function guardedDevnetFetch(input, init) {
 
     const method = rpcMethod(init);
     let nullAccountRetries = 0;
+    let blockhashRetries = 0;
     let lastResponse;
     let lastError;
 
@@ -79,6 +93,17 @@ globalThis.fetch = async function guardedDevnetFetch(input, init) {
           const nullDelay = 500 + (nullAccountRetries * 350);
           await sleep(nullDelay);
           continue;
+        } else if (await isTransientBlockhashError(response, method)) {
+          if (blockhashRetries >= BLOCKHASH_RETRIES) {
+            return response;
+          }
+          blockhashRetries += 1;
+          const blockhashDelay = 650 + (blockhashRetries * 450);
+          console.warn(
+            `Devnet RPC guard retrying transient Blockhash not found (${blockhashRetries}/${BLOCKHASH_RETRIES})`,
+          );
+          await sleep(blockhashDelay);
+          continue;
         } else {
           return response;
         }
@@ -100,5 +125,5 @@ globalThis.fetch = async function guardedDevnetFetch(input, init) {
 };
 
 console.log(
-  `Devnet RPC guard enabled: minInterval=${MIN_INTERVAL_MS}ms maxRetries=${MAX_RETRIES} nullAccountRetries=${NULL_ACCOUNT_RETRIES}`,
+  `Devnet RPC guard enabled: minInterval=${MIN_INTERVAL_MS}ms maxRetries=${MAX_RETRIES} nullAccountRetries=${NULL_ACCOUNT_RETRIES} blockhashRetries=${BLOCKHASH_RETRIES}`,
 );
