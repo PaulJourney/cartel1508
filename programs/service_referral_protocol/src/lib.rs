@@ -10,7 +10,7 @@ use constants::*;
 use math::*;
 use state::*;
 
-declare_id!("4AuoBkj4vkH2K1jwUuECtVBqF6Q74efjGbaw7btuNjRV");
+declare_id!("DA214e5LFbj1WARXzu89k295azhKCGMFcVicsm7CsfpL");
 
 #[program]
 pub mod service_referral_protocol {
