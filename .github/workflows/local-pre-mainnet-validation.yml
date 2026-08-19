@@ -33,13 +33,20 @@ jobs:
           from pathlib import Path
           import sys
           new_id = sys.argv[1]
-          old_id = '4AuoBkj4vkH2K1jwUuECtVBqF6Q74efjGbaw7btuNjRV'
-          for filename in ['programs/service_referral_protocol/src/lib.rs', 'Anchor.toml']:
-              p = Path(filename)
-              text = p.read_text()
-              if old_id not in text:
-                  raise SystemExit(f'expected development Program ID missing in {filename}')
-              p.write_text(text.replace(old_id, new_id))
+          mainnet_id = 'DA214e5LFbj1WARXzu89k295azhKCGMFcVicsm7CsfpL'
+          development_id = '4AuoBkj4vkH2K1jwUuECtVBqF6Q74efjGbaw7btuNjRV'
+
+          lib_path = Path('programs/service_referral_protocol/src/lib.rs')
+          lib_text = lib_path.read_text()
+          if lib_text.count(mainnet_id) != 1:
+              raise SystemExit('expected frozen Mainnet Program ID missing or duplicated in lib.rs')
+          lib_path.write_text(lib_text.replace(mainnet_id, new_id, 1))
+
+          anchor_path = Path('Anchor.toml')
+          anchor_text = anchor_path.read_text()
+          if development_id not in anchor_text or mainnet_id not in anchor_text:
+              raise SystemExit('expected frozen development/mainnet mappings missing in Anchor.toml')
+          anchor_path.write_text(anchor_text.replace(development_id, new_id).replace(mainnet_id, new_id))
           PY
       - name: Start isolated local validator
         run: |
