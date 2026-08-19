@@ -1,0 +1,122 @@
+name: final-freeze-workflow-migration
+
+on:
+  push:
+    branches:
+      - agent/qualified-revenue-final-integration
+    paths:
+      - .github/workflows/final-freeze-workflow-migration.yml
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/qualified-revenue-final-integration
+          fetch-depth: 0
+
+      - name: Migrate validation workflows to frozen Mainnet identity
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          mainnet_id = "DA214e5LFbj1WARXzu89k295azhKCGMFcVicsm7CsfpL"
+          development_id = "4AuoBkj4vkH2K1jwUuECtVBqF6Q74efjGbaw7btuNjRV"
+
+          ci_path = Path('.github/workflows/ci.yml')
+          ci = ci_path.read_text()
+          old_ci = '''      - name: Prove pre-mainnet gate fails closed before final freeze
+        env:
+          RELEASE_SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set +e
+          output="$(python3 scripts/pre-mainnet-gate.py 2>&1)"
+          status=$?
+          set -e
+          printf '%s\\n' "$output"
+          test "$status" -ne 0
+          grep -q 'core Program ID is still a development identity' <<<"$output"
+          grep -q 'registration_open_at is not frozen to a positive UTC unix timestamp' <<<"$output"
+          grep -q 'Anchor.toml has no \\[programs.mainnet\\] Program ID' <<<"$output"
+          grep -q 'release/mainnet-release.json is missing' <<<"$output"
+'''
+          new_ci = '''      - name: Prove pre-mainnet gate remains fail closed pending release evidence
+        env:
+          RELEASE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set +e
+          output="$(python3 scripts/pre-mainnet-gate.py 2>&1)"
+          status=$?
+          set -e
+          printf '%s\\n' "$output"
+          test "$status" -ne 0
+          ! grep -q 'core Program ID is still a development identity' <<<"$output"
+          ! grep -q 'registration_open_at is not frozen to a positive UTC unix timestamp' <<<"$output"
+          ! grep -q 'Anchor.toml has no \\[programs.mainnet\\] Program ID' <<<"$output"
+          grep -q 'release/mainnet-release.json is missing' <<<"$output"
+'''
+          assert ci.count(old_ci) == 1, 'unexpected protocol-ci pre-freeze gate block'
+          ci_path.write_text(ci.replace(old_ci, new_ci, 1))
+
+          old_runtime = '''          new_id = sys.argv[1]
+          old_id = '4AuoBkj4vkH2K1jwUuECtVBqF6Q74efjGbaw7btuNjRV'
+          for filename in ['programs/service_referral_protocol/src/lib.rs', 'Anchor.toml']:
+              p = Path(filename)
+              text = p.read_text()
+              if old_id not in text:
+                  raise SystemExit(f'expected development Program ID missing in {filename}')
+              p.write_text(text.replace(old_id, new_id))
+'''
+          new_runtime = f'''          new_id = sys.argv[1]
+          mainnet_id = '{mainnet_id}'
+          development_id = '{development_id}'
+
+          lib_path = Path('programs/service_referral_protocol/src/lib.rs')
+          lib_text = lib_path.read_text()
+          if lib_text.count(mainnet_id) != 1:
+              raise SystemExit('expected frozen Mainnet Program ID missing or duplicated in lib.rs')
+          lib_path.write_text(lib_text.replace(mainnet_id, new_id, 1))
+
+          anchor_path = Path('Anchor.toml')
+          anchor_text = anchor_path.read_text()
+          if development_id not in anchor_text or mainnet_id not in anchor_text:
+              raise SystemExit('expected frozen development/mainnet mappings missing in Anchor.toml')
+          anchor_path.write_text(anchor_text.replace(development_id, new_id).replace(mainnet_id, new_id))
+'''
+
+          for filename in [
+              '.github/workflows/local-pre-mainnet-validation.yml',
+              '.github/workflows/devnet-deploy-smoke.yml',
+          ]:
+              p = Path(filename)
+              text = p.read_text()
+              assert text.count(old_runtime) == 1, f'unexpected pre-freeze runtime mutation block in {filename}'
+              p.write_text(text.replace(old_runtime, new_runtime, 1))
+
+          # Sanity: source identity remains frozen; only workflows were edited.
+          lib = Path('programs/service_referral_protocol/src/lib.rs').read_text()
+          constants = Path('programs/service_referral_protocol/src/constants.rs').read_text()
+          anchor = Path('Anchor.toml').read_text()
+          assert f'declare_id!("{mainnet_id}")' in lib
+          assert 'MAINNET_REGISTRATION_OPEN_AT: i64 = 1_787_288_400' in constants
+          assert '[programs.mainnet]' in anchor and f'service_referral_protocol = "{mainnet_id}"' in anchor
+          PY
+
+      - name: Remove migration workflow
+        run: rm .github/workflows/final-freeze-workflow-migration.yml
+
+      - name: Commit workflow migration
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/ci.yml .github/workflows/local-pre-mainnet-validation.yml .github/workflows/devnet-deploy-smoke.yml .github/workflows/final-freeze-workflow-migration.yml
+          git diff --cached --check
+          git diff --cached --stat
+          git commit -m "align validation workflows with frozen mainnet identity"
+          git push origin HEAD:agent/qualified-revenue-final-integration
