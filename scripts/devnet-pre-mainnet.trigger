@@ -1,1 +1,1 @@
-2026-08-18 final discoverable public devnet comprehensive + security validation
+2026-08-19 final mainnet freeze exact-head validation
