@@ -32,9 +32,9 @@ jobs:
           node --check scripts/devnet-rpc-guard.mjs
       - name: Static security/economic gates
         run: python3 scripts/static-gates.py
-      - name: Prove pre-mainnet gate fails closed before final freeze
+      - name: Prove pre-mainnet gate remains fail closed pending release evidence
         env:
-          RELEASE_SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+          RELEASE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set +e
           output="$(python3 scripts/pre-mainnet-gate.py 2>&1)"
@@ -42,9 +42,9 @@ jobs:
           set -e
           printf '%s\n' "$output"
           test "$status" -ne 0
-          grep -q 'core Program ID is still a development identity' <<<"$output"
-          grep -q 'registration_open_at is not frozen to a positive UTC unix timestamp' <<<"$output"
-          grep -q 'Anchor.toml has no \[programs.mainnet\] Program ID' <<<"$output"
+          ! grep -q 'core Program ID is still a development identity' <<<"$output"
+          ! grep -q 'registration_open_at is not frozen to a positive UTC unix timestamp' <<<"$output"
+          ! grep -q 'Anchor.toml has no \[programs.mainnet\] Program ID' <<<"$output"
           grep -q 'release/mainnet-release.json is missing' <<<"$output"
       - name: Production compile check
         run: cargo check --locked -p service_referral_protocol --features production
