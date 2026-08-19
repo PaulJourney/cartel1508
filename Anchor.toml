@@ -8,6 +8,9 @@ service_referral_protocol = "4AuoBkj4vkH2K1jwUuECtVBqF6Q74efjGbaw7btuNjRV"
 [programs.devnet]
 service_referral_protocol = "4AuoBkj4vkH2K1jwUuECtVBqF6Q74efjGbaw7btuNjRV"
 
+[programs.mainnet]
+service_referral_protocol = "DA214e5LFbj1WARXzu89k295azhKCGMFcVicsm7CsfpL"
+
 [provider]
 cluster = "localnet"
 wallet = "~/.config/solana/id.json"
