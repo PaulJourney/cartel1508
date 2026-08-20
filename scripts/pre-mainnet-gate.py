@@ -93,7 +93,13 @@ def main() -> int:
     treasury = extract(r'MAINNET_SERVICE_TREASURY: Pubkey\s*=\s*pubkey!\("([1-9A-HJ-NP-Za-km-z]+)"\)', constants, "mainnet treasury")
     usdt = extract(r'MAINNET_USDT_MINT: Pubkey\s*=\s*pubkey!\("([1-9A-HJ-NP-Za-km-z]+)"\)', constants, "USDT mint")
     usdc = extract(r'MAINNET_USDC_MINT: Pubkey\s*=\s*pubkey!\("([1-9A-HJ-NP-Za-km-z]+)"\)', constants, "USDC mint")
-    registration_open = int(extract(r'MAINNET_REGISTRATION_OPEN_AT: i64 = (-?\d+)', constants, "registration open timestamp"))
+    registration_open = int(
+        extract(
+            r'MAINNET_REGISTRATION_OPEN_AT: i64 = (-?[0-9][0-9_]*)',
+            constants,
+            "registration open timestamp",
+        ).replace("_", "")
+    )
 
     for field, actual in (("service_treasury", treasury), ("usdt_mint", usdt), ("usdc_mint", usdc)):
         if actual != EXPECTED[field]:
