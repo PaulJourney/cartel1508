@@ -157,6 +157,14 @@ jobs:
         run: |
           npm run devnet:security | tee /tmp/devnet-security-adversarial.txt
           grep -q 'DEVNET SECURITY ADVERSARIAL VALIDATION: PASS' /tmp/devnet-security-adversarial.txt
+      - name: Reclaim temporary devnet program rent
+        if: always()
+        run: |
+          if [ -n "${PROGRAM_ID:-}" ] && solana program show "$PROGRAM_ID" --url devnet >/dev/null 2>&1; then
+            solana program close "$PROGRAM_ID" --bypass-warning --url devnet | tee /tmp/devnet-program-close.txt
+          else
+            echo "No deployed temporary program to close." | tee /tmp/devnet-program-close.txt
+          fi
       - name: Record final deployer balance
         if: always()
         run: solana balance --url devnet | tee /tmp/devnet-end-balance.txt || true
@@ -174,6 +182,7 @@ jobs:
             /tmp/devnet-deployer-pubkey.txt
             /tmp/devnet-deploy.txt
             /tmp/devnet-program-show.txt
+            /tmp/devnet-program-close.txt
             /tmp/devnet-start-balance.txt
             /tmp/devnet-end-balance.txt
             /tmp/devnet-pre-mainnet-validation.txt
