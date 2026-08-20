@@ -8,7 +8,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const MIN_INTERVAL_MS = Number(process.env.DEVNET_RPC_MIN_INTERVAL_MS || 450);
 const MAX_RETRIES = Number(process.env.DEVNET_RPC_MAX_RETRIES || 9);
 const NULL_ACCOUNT_RETRIES = Number(process.env.DEVNET_NULL_ACCOUNT_RETRIES || 4);
-const BLOCKHASH_RETRIES = Number(process.env.DEVNET_BLOCKHASH_RETRIES || 5);
+const BLOCKHASH_RETRIES = Number(process.env.DEVNET_BLOCKHASH_RETRIES || 0);
 
 let queue = Promise.resolve();
 let nextRequestAt = 0;
@@ -18,14 +18,38 @@ function isGuardedRpc(input) {
   return url.includes("api.devnet.solana.com");
 }
 
-function rpcMethod(init) {
+function rpcPayload(init) {
   const body = init?.body;
   if (typeof body !== "string") return null;
   try {
-    return JSON.parse(body)?.method || null;
+    return JSON.parse(body);
   } catch {
     return null;
   }
+}
+
+function rpcMethod(init) {
+  return rpcPayload(init)?.method || null;
+}
+
+function withAlignedPreflightCommitment(init, method) {
+  if (!["sendTransaction", "simulateTransaction"].includes(method)) return init;
+
+  const payload = rpcPayload(init);
+  if (!payload || !Array.isArray(payload.params)) return init;
+
+  const config = payload.params[1];
+  if (config?.preflightCommitment) return init;
+
+  payload.params[1] = {
+    ...(config && typeof config === "object" ? config : {}),
+    preflightCommitment: "confirmed",
+  };
+
+  return {
+    ...init,
+    body: JSON.stringify(payload),
+  };
 }
 
 async function isTransientNullAccount(response, method) {
@@ -67,6 +91,7 @@ globalThis.fetch = async function guardedDevnetFetch(input, init) {
     if (spacing > 0) await sleep(spacing);
 
     const method = rpcMethod(init);
+    const requestInit = withAlignedPreflightCommitment(init, method);
     let nullAccountRetries = 0;
     let blockhashRetries = 0;
     let lastResponse;
@@ -75,7 +100,7 @@ globalThis.fetch = async function guardedDevnetFetch(input, init) {
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
       nextRequestAt = Date.now() + MIN_INTERVAL_MS;
       try {
-        const response = await nativeFetch(input, init);
+        const response = await nativeFetch(input, requestInit);
         lastResponse = response;
 
         if ([429, 502, 503, 504].includes(response.status)) {
@@ -125,5 +150,5 @@ globalThis.fetch = async function guardedDevnetFetch(input, init) {
 };
 
 console.log(
-  `Devnet RPC guard enabled: minInterval=${MIN_INTERVAL_MS}ms maxRetries=${MAX_RETRIES} nullAccountRetries=${NULL_ACCOUNT_RETRIES} blockhashRetries=${BLOCKHASH_RETRIES}`,
+  `Devnet RPC guard enabled: minInterval=${MIN_INTERVAL_MS}ms maxRetries=${MAX_RETRIES} nullAccountRetries=${NULL_ACCOUNT_RETRIES} blockhashRetries=${BLOCKHASH_RETRIES} preflightCommitment=confirmed`,
 );
