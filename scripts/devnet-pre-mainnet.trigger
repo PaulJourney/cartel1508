@@ -1,1 +1,1 @@
-2026-08-19 final mainnet freeze exact-head validation
+2026-08-20 persistent devnet deployer validation
