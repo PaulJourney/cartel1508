@@ -1,0 +1,76 @@
+name: audit-production-post-open-runtime
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  exact-production-post-open:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout audit supplement branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prove supplement is isolated from frozen production source
+        run: |
+          set -euo pipefail
+          FROZEN_SHA=36420887aad96b3c5b9680a35c6dc211b893c2bc
+          git cat-file -e "${FROZEN_SHA}^{commit}"
+          git diff --name-only "$FROZEN_SHA" HEAD | sort | tee /tmp/audit-supplement-files.txt
+          printf '%s\n' \
+            '.github/workflows/audit-production-post-open.yml' \
+            'scripts/audit-production-post-open.mjs' | sort > /tmp/audit-supplement-expected.txt
+          diff -u /tmp/audit-supplement-expected.txt /tmp/audit-supplement-files.txt
+          printf '%s\n' "$FROZEN_SHA" | tee /tmp/frozen-source-sha.txt
+          git rev-parse HEAD | tee /tmp/supplement-head-sha.txt
+
+      - name: Download exact previously verified production artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: service-referral-core-v0.12-verifiable-production
+          path: /tmp/verifiable
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: PaulJourney/cartel1508
+          run-id: 32451874440
+
+      - name: Verify exact production artifact identity
+        run: |
+          set -euo pipefail
+          EXPECTED=0c632adebe065b56c5697d0ee9879d93977d10b55e3d554a17a4641ee1533369
+          test -s /tmp/verifiable/target/verifiable/service_referral_protocol.so
+          ACTUAL="$(sha256sum /tmp/verifiable/target/verifiable/service_referral_protocol.so | awk '{print $1}')"
+          test "$ACTUAL" = "$EXPECTED"
+          printf '%s  %s\n' "$ACTUAL" /tmp/verifiable/target/verifiable/service_referral_protocol.so | tee /tmp/production-so.sha256
+          grep -q 'DA214e5LFbj1WARXzu89k295azhKCGMFcVicsm7CsfpL' /tmp/verifiable/target/idl/service_referral_protocol.json
+
+      - name: Install pinned local-runtime tooling
+        run: |
+          npm install --no-audit --no-fund --ignore-scripts
+          npm install --no-save --no-audit --no-fund litesvm@1.3.0 @solana/kit@7.1.1
+
+      - name: Execute exact production post-open register purchase claim
+        env:
+          PRODUCTION_SO: /tmp/verifiable/target/verifiable/service_referral_protocol.so
+        run: |
+          set -o pipefail
+          node scripts/audit-production-post-open.mjs | tee /tmp/production-post-open-validation.txt
+          grep -q 'PRODUCTION POST-OPEN PURCHASE/CLAIM SUPPLEMENT: PASS' /tmp/production-post-open-validation.txt
+
+      - name: Publish non-secret supplemental evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-post-open-runtime-supplement
+          path: |
+            /tmp/frozen-source-sha.txt
+            /tmp/supplement-head-sha.txt
+            /tmp/audit-supplement-files.txt
+            /tmp/production-so.sha256
+            /tmp/production-post-open-validation.txt
+          if-no-files-found: warn
