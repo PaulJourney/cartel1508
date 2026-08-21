@@ -85,6 +85,12 @@ jobs:
           path: /tmp/devnet-deployer-pubkey.txt
           if-no-files-found: error
           retention-days: 1
+      - name: Reclaim stale devnet buffers
+        run: |
+          set -o pipefail
+          solana program show --buffers --url devnet | tee /tmp/devnet-buffers-before.txt || true
+          solana program close --buffers --url devnet | tee /tmp/devnet-stale-buffer-close.txt || true
+          solana balance --url devnet | tee /tmp/devnet-post-stale-buffer-balance.txt
       - name: Ensure deployer has enough devnet SOL
         run: |
           REQUIRED_LAMPORTS=4000000000
@@ -133,10 +139,17 @@ jobs:
           node --check scripts/devnet-security-adversarial.mjs
           node --check scripts/devnet-rpc-guard.mjs
           sha256sum target/deploy/service_referral_protocol.so | tee /tmp/devnet-runtime-so.sha256
+          PROGRAM_SO_LEN="$(stat -c%s target/deploy/service_referral_protocol.so)"
+          PROGRAM_MAX_LEN="$((PROGRAM_SO_LEN + 4096))"
+          echo "PROGRAM_SO_LEN=$PROGRAM_SO_LEN" >> "$GITHUB_ENV"
+          echo "PROGRAM_MAX_LEN=$PROGRAM_MAX_LEN" >> "$GITHUB_ENV"
+          printf 'program_so_len=%s\nprogram_max_len=%s\n' "$PROGRAM_SO_LEN" "$PROGRAM_MAX_LEN" | tee /tmp/devnet-program-sizing.txt
       - name: Deploy to devnet
         run: |
+          set -o pipefail
           solana program deploy target/deploy/service_referral_protocol.so \
             --program-id target/deploy/service_referral_protocol-keypair.json \
+            --max-len "$PROGRAM_MAX_LEN" \
             --url devnet | tee /tmp/devnet-deploy.txt
           solana program show "$PROGRAM_ID" --url devnet | tee /tmp/devnet-program-show.txt
       - name: Install pinned validation-client dependencies
@@ -147,6 +160,7 @@ jobs:
           ANCHOR_WALLET: ~/.config/solana/id.json
           PROTOCOL_IDL: target/idl/service_referral_protocol.json
         run: |
+          set -o pipefail
           npm run devnet:pre-mainnet | tee /tmp/devnet-pre-mainnet-validation.txt
           grep -q 'DEVNET PRE-MAINNET COMPREHENSIVE VALIDATION: PASS' /tmp/devnet-pre-mainnet-validation.txt
       - name: Execute runtime security adversarial validation
@@ -155,16 +169,19 @@ jobs:
           ANCHOR_WALLET: ~/.config/solana/id.json
           PROTOCOL_IDL: target/idl/service_referral_protocol.json
         run: |
+          set -o pipefail
           npm run devnet:security | tee /tmp/devnet-security-adversarial.txt
           grep -q 'DEVNET SECURITY ADVERSARIAL VALIDATION: PASS' /tmp/devnet-security-adversarial.txt
-      - name: Reclaim temporary devnet program rent
+      - name: Reclaim temporary devnet program rent and buffers
         if: always()
         run: |
+          set -o pipefail
           if [ -n "${PROGRAM_ID:-}" ] && solana program show "$PROGRAM_ID" --url devnet >/dev/null 2>&1; then
-            solana program close "$PROGRAM_ID" --bypass-warning --url devnet | tee /tmp/devnet-program-close.txt
+            solana program close "$PROGRAM_ID" --bypass-warning --url devnet | tee /tmp/devnet-program-close.txt || true
           else
             echo "No deployed temporary program to close." | tee /tmp/devnet-program-close.txt
           fi
+          solana program close --buffers --url devnet | tee /tmp/devnet-buffer-close.txt || true
       - name: Record final deployer balance
         if: always()
         run: solana balance --url devnet | tee /tmp/devnet-end-balance.txt || true
@@ -180,11 +197,16 @@ jobs:
             /tmp/devnet-runtime-so.sha256
             /tmp/devnet-program-id.txt
             /tmp/devnet-deployer-pubkey.txt
+            /tmp/devnet-buffers-before.txt
+            /tmp/devnet-stale-buffer-close.txt
+            /tmp/devnet-post-stale-buffer-balance.txt
+            /tmp/devnet-start-balance.txt
+            /tmp/devnet-program-sizing.txt
             /tmp/devnet-deploy.txt
             /tmp/devnet-program-show.txt
-            /tmp/devnet-program-close.txt
-            /tmp/devnet-start-balance.txt
-            /tmp/devnet-end-balance.txt
             /tmp/devnet-pre-mainnet-validation.txt
             /tmp/devnet-security-adversarial.txt
+            /tmp/devnet-program-close.txt
+            /tmp/devnet-buffer-close.txt
+            /tmp/devnet-end-balance.txt
           if-no-files-found: warn
