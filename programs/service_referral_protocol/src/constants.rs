@@ -42,8 +42,10 @@ pub const MAINNET_USDC_MINT: Pubkey = pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wE
 pub const MAINNET_SERVICE_TREASURY: Pubkey =
     pubkey!("AepYo8xanmKuRiLVeYQuCTJoQr1nyKiTApoKwHMEg8fn");
 
-// Frozen production launch: 2026-08-21 07:00 CEST = 2026-08-21 05:00 UTC.
-pub const MAINNET_REGISTRATION_OPEN_AT: i64 = 1_787_288_400;
+// Safety-gated production launch: 2026-09-01 07:00 CEST = 2026-09-01 05:00 UTC.
+// This remains deliberately future-dated until production runtime evidence and
+// the independent audit are complete and bound to the exact release head.
+pub const MAINNET_REGISTRATION_OPEN_AT: i64 = 1_788_238_800;
 
 pub fn percentages_valid() -> bool {
     SELF_BPS + NETWORK_BPS + PIONEER_BPS + SERVICE_BPS == BPS_DENOMINATOR
