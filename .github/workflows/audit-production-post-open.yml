@@ -7,6 +7,10 @@ on:
       - audit/production-post-open-runtime
     paths:
       - .github/workflows/audit-production-post-open.yml
+  pull_request:
+    paths:
+      - .github/workflows/audit-production-post-open.yml
+      - scripts/audit-production-post-open.mjs
 
 permissions:
   contents: read
@@ -20,6 +24,7 @@ jobs:
       - name: Checkout audit supplement branch
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
       - name: Prove supplement is isolated from frozen production source
