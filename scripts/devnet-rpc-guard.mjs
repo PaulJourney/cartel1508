@@ -6,8 +6,8 @@ if (!nativeFetch) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const MIN_INTERVAL_MS = Number(process.env.DEVNET_RPC_MIN_INTERVAL_MS || 450);
-const MAX_RETRIES = Number(process.env.DEVNET_RPC_MAX_RETRIES || 9);
-const NULL_ACCOUNT_RETRIES = Number(process.env.DEVNET_NULL_ACCOUNT_RETRIES || 4);
+const MAX_RETRIES = Number(process.env.DEVNET_RPC_MAX_RETRIES || 18);
+const NULL_ACCOUNT_RETRIES = Number(process.env.DEVNET_NULL_ACCOUNT_RETRIES || 12);
 const BLOCKHASH_RETRIES = Number(process.env.DEVNET_BLOCKHASH_RETRIES || 0);
 
 let queue = Promise.resolve();
@@ -116,6 +116,9 @@ globalThis.fetch = async function guardedDevnetFetch(input, init) {
           }
           nullAccountRetries += 1;
           const nullDelay = 500 + (nullAccountRetries * 350);
+          console.warn(
+            `Devnet RPC guard retrying transient null account (${nullAccountRetries}/${NULL_ACCOUNT_RETRIES})`,
+          );
           await sleep(nullDelay);
           continue;
         } else if (await isTransientBlockhashError(response, method)) {
