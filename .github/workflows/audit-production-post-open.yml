@@ -74,9 +74,13 @@ jobs:
           PRODUCTION_SO: /tmp/verifiable/target/verifiable/service_referral_protocol.so
         run: |
           set -o pipefail
-          # LiteSVM 1.3 exposes failed-transaction logs as a property rather than a method.
-          # Patch only the audit helper in the ephemeral runner so error reporting cannot mask the real result.
-          sed -i 's/result\.logs()\.join/result.logs.join/' scripts/audit-production-post-open.mjs
+          # Audit-harness-only compatibility patch. Production source/artifact are untouched.
+          # Each transaction receives a fresh local blockhash so a rejected pre-open
+          # registration cannot collide with the otherwise-identical post-open retry.
+          sed -i '/const message = pipe(/i\  svm.expireBlockhash();' scripts/audit-production-post-open.mjs
+          # Error reporting must never mask the actual LiteSVM transaction error.
+          sed -i '/throw new Error(`${label} failed:/c\    throw new Error(`${label} failed: ${String(result.err())}`);' scripts/audit-production-post-open.mjs
+          git diff -- scripts/audit-production-post-open.mjs | tee /tmp/runtime-harness-compat.diff
           node scripts/audit-production-post-open.mjs | tee /tmp/production-post-open-validation.txt
           grep -q 'PRODUCTION POST-OPEN PURCHASE/CLAIM SUPPLEMENT: PASS' /tmp/production-post-open-validation.txt
 
@@ -90,5 +94,6 @@ jobs:
             /tmp/supplement-head-sha.txt
             /tmp/audit-supplement-files.txt
             /tmp/production-so.sha256
+            /tmp/runtime-harness-compat.diff
             /tmp/production-post-open-validation.txt
           if-no-files-found: warn
