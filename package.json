@@ -3,7 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "devnet:smoke": "node scripts/devnet-transaction-smoke.mjs"
+    "devnet:smoke": "node scripts/devnet-transaction-smoke.mjs",
+    "devnet:pre-mainnet": "node --import ./scripts/devnet-rpc-guard.mjs scripts/devnet-comprehensive-validation.mjs",
+    "devnet:security": "node --import ./scripts/devnet-rpc-guard.mjs scripts/devnet-security-adversarial.mjs",
+    "production:runtime": "node scripts/production-runtime-validation.mjs"
   },
   "dependencies": {
     "@anchor-lang/core": "1.1.2",

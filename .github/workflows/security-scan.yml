@@ -1,38 +1,31 @@
 name: rustsec-security-scan
-on:
-  pull_request:
-    paths:
-      - '.github/workflows/security-scan.yml'
-      - 'Cargo.lock'
-      - 'Cargo.toml'
-      - 'programs/**/Cargo.toml'
+on: [pull_request]
 permissions:
   contents: read
+
+# Exact-head checkout is intentional: audit evidence must bind to every PR source SHA,
+# including documentation-only final marker commits used for release evidence.
 jobs:
   cargo-audit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact source head
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
       - name: Install pinned cargo-audit
         run: cargo install cargo-audit --version 0.22.2 --locked
-      - name: Scan core production Cargo.lock against RustSec
+      - name: Scan final core production Cargo.lock against RustSec
         run: |
           set -o pipefail
           cargo audit --json | tee cargo-audit-core.json
-      - name: Resolve and scan Revenue Adapter dependency graph against RustSec
-        working-directory: programs/revenue_adapter
-        run: |
-          set -o pipefail
-          cargo generate-lockfile
-          sha256sum Cargo.lock | tee Cargo.lock.sha256
-          cargo audit --json | tee ../../cargo-audit-revenue-adapter.json
       - name: Retain audit evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: rustsec-cargo-audit
-          path: |
-            cargo-audit-core.json
-            cargo-audit-revenue-adapter.json
-            programs/revenue_adapter/Cargo.lock.sha256
+          name: rustsec-cargo-audit-core
+          path: cargo-audit-core.json
           if-no-files-found: warn

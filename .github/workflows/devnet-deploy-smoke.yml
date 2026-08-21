@@ -1,85 +1,216 @@
 name: devnet-deploy-smoke
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - scripts/devnet-pre-mainnet.trigger
 permissions:
   contents: read
+concurrency:
+  group: devnet-persistent-wallet-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
 jobs:
-  deploy-smoke:
+  trigger-check:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    outputs:
+      run_devnet: ${{ steps.check.outputs.run_devnet }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 2
+      - name: Detect explicit devnet trigger
+        id: check
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "run_devnet=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git rev-parse HEAD^ >/dev/null 2>&1 && \
+             git diff --name-only HEAD^ HEAD -- scripts/devnet-pre-mainnet.trigger | grep -qx 'scripts/devnet-pre-mainnet.trigger'; then
+            echo "run_devnet=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_devnet=false" >> "$GITHUB_OUTPUT"
+            echo "Devnet validation intentionally skipped: explicit trigger file was not changed in the latest commit."
+          fi
+  deploy-smoke:
+    needs: trigger-check
+    if: needs.trigger-check.outputs.run_devnet == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    env:
+      DEVNET_DEPLOYER_KEYPAIR_JSON: ${{ secrets.DEVNET_DEPLOYER_KEYPAIR_JSON }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact source head
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          printf '%s\n' "$EXPECTED_HEAD_SHA" | tee /tmp/devnet-source-head.txt
       - uses: solana-foundation/github-actions/setup-all@v0.2.15
         with:
           solana_version: '3.1.10'
           anchor_version: '1.1.2'
           node_version: '24'
-      - name: Configure ephemeral devnet identities
+      - name: Configure persistent devnet identity and temporary program identity
         run: |
+          set -euo pipefail
+          test -n "${DEVNET_DEPLOYER_KEYPAIR_JSON:-}" || { echo 'DEVNET_DEPLOYER_KEYPAIR_JSON is required'; exit 1; }
           solana config set --url devnet
-          solana-keygen new --no-bip39-passphrase --silent --force -o ~/.config/solana/id.json
-          mkdir -p target/deploy
+          mkdir -p ~/.config/solana target/deploy
+          printf '%s' "$DEVNET_DEPLOYER_KEYPAIR_JSON" > ~/.config/solana/id.json
+          chmod 600 ~/.config/solana/id.json
+          DEPLOYER="$(solana-keygen pubkey ~/.config/solana/id.json)"
+          echo "DEVNET_DEPLOYER_PUBKEY=$DEPLOYER" >> "$GITHUB_ENV"
+          printf '%s\n' "$DEPLOYER" | tee /tmp/devnet-deployer-pubkey.txt
+          echo "::notice title=Persistent Devnet deployer::$DEPLOYER"
+
           solana-keygen new --no-bip39-passphrase --silent --force -o target/deploy/service_referral_protocol-keypair.json
           PROGRAM_ID="$(solana-keygen pubkey target/deploy/service_referral_protocol-keypair.json)"
           echo "PROGRAM_ID=$PROGRAM_ID" >> "$GITHUB_ENV"
+          printf '%s\n' "$PROGRAM_ID" | tee /tmp/devnet-program-id.txt
+
           python3 - "$PROGRAM_ID" <<'PY'
           from pathlib import Path
           import sys
           new_id = sys.argv[1]
-          old_id = '4AuoBkj4vkH2K1jwUuECtVBqF6Q74efjGbaw7btuNjRV'
-          for filename in ['programs/service_referral_protocol/src/lib.rs', 'Anchor.toml']:
-              p = Path(filename)
-              text = p.read_text()
-              if old_id not in text:
-                  raise SystemExit(f'expected development Program ID missing in {filename}')
-              p.write_text(text.replace(old_id, new_id))
+          mainnet_id = 'DA214e5LFbj1WARXzu89k295azhKCGMFcVicsm7CsfpL'
+          development_id = '4AuoBkj4vkH2K1jwUuECtVBqF6Q74efjGbaw7btuNjRV'
+          lib_path = Path('programs/service_referral_protocol/src/lib.rs')
+          lib_text = lib_path.read_text()
+          if lib_text.count(mainnet_id) != 1:
+              raise SystemExit('expected frozen Mainnet Program ID missing or duplicated in lib.rs')
+          lib_path.write_text(lib_text.replace(mainnet_id, new_id, 1))
+          anchor_path = Path('Anchor.toml')
+          anchor_text = anchor_path.read_text()
+          if development_id not in anchor_text or mainnet_id not in anchor_text:
+              raise SystemExit('expected frozen development/mainnet mappings missing in Anchor.toml')
+          anchor_path.write_text(anchor_text.replace(development_id, new_id).replace(mainnet_id, new_id))
           PY
-          printf '%s\n' "$PROGRAM_ID" | tee /tmp/devnet-program-id.txt
-      - name: Fund ephemeral deployer with devnet SOL
+          git diff --check
+          git diff --name-only | sort | tee /tmp/devnet-runtime-changed-files.txt
+          printf '%s\n' 'Anchor.toml' 'programs/service_referral_protocol/src/lib.rs' | sort > /tmp/devnet-runtime-expected-files.txt
+          diff -u /tmp/devnet-runtime-expected-files.txt /tmp/devnet-runtime-changed-files.txt
+          git diff -- Anchor.toml programs/service_referral_protocol/src/lib.rs > /tmp/devnet-runtime-program-id.diff
+      - name: Reclaim stale temporary programs and buffers owned by persistent deployer
         run: |
-          funded=0
-          for amount in 5 2 1; do
-            if solana airdrop "$amount" --url devnet; then
-              funded=1
-              break
-            fi
-            sleep 5
-          done
-          test "$funded" = "1"
+          set -euo pipefail
+          solana program show --programs --url devnet | tee /tmp/devnet-programs-before.txt || true
+          : > /tmp/devnet-stale-program-close.txt
+          solana program show --programs --url devnet 2>/dev/null \
+            | awk -F'|' 'NR>2 {gsub(/^[ \t]+|[ \t]+$/, "", $1); if ($1 != "") print $1}' \
+            | while read -r STALE_PROGRAM_ID; do
+                echo "Closing stale temporary program $STALE_PROGRAM_ID" | tee -a /tmp/devnet-stale-program-close.txt
+                solana program close "$STALE_PROGRAM_ID" --bypass-warning --url devnet \
+                  | tee -a /tmp/devnet-stale-program-close.txt || true
+              done
+          solana program show --buffers --url devnet | tee /tmp/devnet-buffers-before.txt || true
+          solana program close --buffers --url devnet | tee /tmp/devnet-stale-buffer-close.txt || true
+          solana balance --url devnet | tee /tmp/devnet-post-stale-reclaim-balance.txt
+      - name: Ensure persistent deployer has enough devnet SOL
+        run: |
+          set -euo pipefail
+          REQUIRED_LAMPORTS=4000000000
+          BALANCE_LAMPORTS="$(solana balance --lamports --url devnet | awk '{print $1}')"
+          if [ "$BALANCE_LAMPORTS" -lt "$REQUIRED_LAMPORTS" ]; then
+            for amount in 2 1; do
+              solana airdrop "$amount" --url devnet || true
+              BALANCE_LAMPORTS="$(solana balance --lamports --url devnet | awk '{print $1}')"
+              [ "$BALANCE_LAMPORTS" -ge "$REQUIRED_LAMPORTS" ] && break
+              sleep 5
+            done
+          fi
+          echo "devnet deployer balance: ${BALANCE_LAMPORTS} lamports"
+          if [ "$BALANCE_LAMPORTS" -lt "$REQUIRED_LAMPORTS" ]; then
+            echo "DEVNET FUNDING BLOCKED: persistent deployer did not reach 4 devnet SOL."
+            exit 1
+          fi
           solana balance --url devnet | tee /tmp/devnet-start-balance.txt
       - name: Build temporary-ID program
         run: |
+          set -euo pipefail
           cargo-build-sbf --install-only
           anchor build --ignore-keys
           test -s target/deploy/service_referral_protocol.so
           test -s target/idl/service_referral_protocol.json
+          node --check scripts/devnet-comprehensive-validation.mjs
+          node --check scripts/devnet-security-adversarial.mjs
+          node --check scripts/devnet-rpc-guard.mjs
+          sha256sum target/deploy/service_referral_protocol.so | tee /tmp/devnet-runtime-so.sha256
+          PROGRAM_SO_LEN="$(stat -c%s target/deploy/service_referral_protocol.so)"
+          PROGRAM_MAX_LEN="$((PROGRAM_SO_LEN + 4096))"
+          echo "PROGRAM_SO_LEN=$PROGRAM_SO_LEN" >> "$GITHUB_ENV"
+          echo "PROGRAM_MAX_LEN=$PROGRAM_MAX_LEN" >> "$GITHUB_ENV"
+          printf 'program_so_len=%s\nprogram_max_len=%s\n' "$PROGRAM_SO_LEN" "$PROGRAM_MAX_LEN" | tee /tmp/devnet-program-sizing.txt
       - name: Deploy to devnet
         run: |
+          set -euo pipefail
           solana program deploy target/deploy/service_referral_protocol.so \
             --program-id target/deploy/service_referral_protocol-keypair.json \
+            --max-len "$PROGRAM_MAX_LEN" \
             --url devnet | tee /tmp/devnet-deploy.txt
           solana program show "$PROGRAM_ID" --url devnet | tee /tmp/devnet-program-show.txt
-      - name: Install pinned smoke-client dependencies
+      - name: Install pinned validation-client dependencies
         run: npm install --no-audit --no-fund --ignore-scripts
-      - name: Execute production-equivalent devnet transactions
+      - name: Execute comprehensive pre-mainnet validation
         env:
           ANCHOR_PROVIDER_URL: https://api.devnet.solana.com
           ANCHOR_WALLET: ~/.config/solana/id.json
           PROTOCOL_IDL: target/idl/service_referral_protocol.json
         run: |
-          npm run devnet:smoke | tee /tmp/devnet-transaction-smoke.txt
-          grep -q 'DEVNET TRANSACTION SMOKE: PASS' /tmp/devnet-transaction-smoke.txt
-      - name: Record final ephemeral deployer balance
-        run: solana balance --url devnet | tee /tmp/devnet-end-balance.txt
-      - name: Publish only non-secret smoke evidence
+          set -euo pipefail
+          npm run devnet:pre-mainnet | tee /tmp/devnet-pre-mainnet-validation.txt
+          grep -q 'DEVNET PRE-MAINNET COMPREHENSIVE VALIDATION: PASS' /tmp/devnet-pre-mainnet-validation.txt
+      - name: Execute runtime security adversarial validation
+        env:
+          ANCHOR_PROVIDER_URL: https://api.devnet.solana.com
+          ANCHOR_WALLET: ~/.config/solana/id.json
+          PROTOCOL_IDL: target/idl/service_referral_protocol.json
+        run: |
+          set -euo pipefail
+          npm run devnet:security | tee /tmp/devnet-security-adversarial.txt
+          grep -q 'DEVNET SECURITY ADVERSARIAL VALIDATION: PASS' /tmp/devnet-security-adversarial.txt
+      - name: Reclaim current temporary devnet program and buffers
+        if: always()
+        run: |
+          set -o pipefail
+          if [ -n "${PROGRAM_ID:-}" ] && solana program show "$PROGRAM_ID" --url devnet >/dev/null 2>&1; then
+            solana program close "$PROGRAM_ID" --bypass-warning --url devnet | tee /tmp/devnet-program-close.txt || true
+          else
+            echo "No deployed current temporary program to close." | tee /tmp/devnet-program-close.txt
+          fi
+          solana program close --buffers --url devnet | tee /tmp/devnet-buffer-close.txt || true
+      - name: Record final deployer balance
+        if: always()
+        run: solana balance --url devnet | tee /tmp/devnet-end-balance.txt || true
+      - name: Publish only non-secret comprehensive evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: devnet-transaction-smoke-evidence
+          name: devnet-pre-mainnet-comprehensive-evidence
           path: |
+            /tmp/devnet-source-head.txt
+            /tmp/devnet-runtime-changed-files.txt
+            /tmp/devnet-runtime-program-id.diff
+            /tmp/devnet-runtime-so.sha256
             /tmp/devnet-program-id.txt
+            /tmp/devnet-deployer-pubkey.txt
+            /tmp/devnet-programs-before.txt
+            /tmp/devnet-stale-program-close.txt
+            /tmp/devnet-buffers-before.txt
+            /tmp/devnet-stale-buffer-close.txt
+            /tmp/devnet-post-stale-reclaim-balance.txt
+            /tmp/devnet-start-balance.txt
+            /tmp/devnet-program-sizing.txt
             /tmp/devnet-deploy.txt
             /tmp/devnet-program-show.txt
-            /tmp/devnet-start-balance.txt
+            /tmp/devnet-pre-mainnet-validation.txt
+            /tmp/devnet-security-adversarial.txt
+            /tmp/devnet-program-close.txt
+            /tmp/devnet-buffer-close.txt
             /tmp/devnet-end-balance.txt
-            /tmp/devnet-transaction-smoke.txt
-          if-no-files-found: error
+          if-no-files-found: warn

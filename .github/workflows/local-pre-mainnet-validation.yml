@@ -1,0 +1,123 @@
+name: local-pre-mainnet-validation
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  comprehensive-local-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact source head
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+      - uses: solana-foundation/github-actions/setup-all@v0.2.15
+        with:
+          solana_version: '3.1.10'
+          anchor_version: '1.1.2'
+          node_version: '24'
+      - name: Create disposable local identities
+        run: |
+          mkdir -p ~/.config/solana target/deploy
+          solana-keygen new --no-bip39-passphrase --silent --force -o ~/.config/solana/id.json
+          solana-keygen new --no-bip39-passphrase --silent --force -o target/deploy/service_referral_protocol-keypair.json
+          PROGRAM_ID="$(solana-keygen pubkey target/deploy/service_referral_protocol-keypair.json)"
+          echo "PROGRAM_ID=$PROGRAM_ID" >> "$GITHUB_ENV"
+          printf '%s\n' "$PROGRAM_ID" | tee /tmp/local-program-id.txt
+          python3 - "$PROGRAM_ID" <<'PY'
+          from pathlib import Path
+          import sys
+          new_id = sys.argv[1]
+          mainnet_id = 'DA214e5LFbj1WARXzu89k295azhKCGMFcVicsm7CsfpL'
+          development_id = '4AuoBkj4vkH2K1jwUuECtVBqF6Q74efjGbaw7btuNjRV'
+
+          lib_path = Path('programs/service_referral_protocol/src/lib.rs')
+          lib_text = lib_path.read_text()
+          if lib_text.count(mainnet_id) != 1:
+              raise SystemExit('expected frozen Mainnet Program ID missing or duplicated in lib.rs')
+          lib_path.write_text(lib_text.replace(mainnet_id, new_id, 1))
+
+          anchor_path = Path('Anchor.toml')
+          anchor_text = anchor_path.read_text()
+          if development_id not in anchor_text or mainnet_id not in anchor_text:
+              raise SystemExit('expected frozen development/mainnet mappings missing in Anchor.toml')
+          anchor_path.write_text(anchor_text.replace(development_id, new_id).replace(mainnet_id, new_id))
+          PY
+      - name: Start isolated local validator
+        run: |
+          solana config set --url localhost
+          rm -rf /tmp/solana-pre-mainnet-ledger
+          nohup solana-test-validator \
+            --ledger /tmp/solana-pre-mainnet-ledger \
+            --reset \
+            --quiet \
+            > /tmp/solana-test-validator.log 2>&1 &
+          echo $! > /tmp/solana-test-validator.pid
+          for attempt in $(seq 1 60); do
+            if solana cluster-version --url localhost >/tmp/local-cluster-version.txt 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+          solana cluster-version --url localhost
+          solana airdrop 1000 --url localhost
+          solana balance --url localhost | tee /tmp/local-start-balance.txt
+      - name: Build temporary-ID program
+        run: |
+          cargo-build-sbf --install-only
+          anchor build --ignore-keys
+          test -s target/deploy/service_referral_protocol.so
+          test -s target/idl/service_referral_protocol.json
+          node --check scripts/devnet-comprehensive-validation.mjs
+          node --check scripts/devnet-security-adversarial.mjs
+          node --check scripts/devnet-rpc-guard.mjs
+      - name: Deploy to isolated local validator
+        run: |
+          solana program deploy target/deploy/service_referral_protocol.so \
+            --program-id target/deploy/service_referral_protocol-keypair.json \
+            --url localhost | tee /tmp/local-deploy.txt
+          solana program show "$PROGRAM_ID" --url localhost | tee /tmp/local-program-show.txt
+      - name: Install pinned validation-client dependencies
+        run: npm install --no-audit --no-fund --ignore-scripts
+      - name: Execute comprehensive production-equivalent transactions locally
+        env:
+          ANCHOR_PROVIDER_URL: http://127.0.0.1:8899
+          ANCHOR_WALLET: ~/.config/solana/id.json
+          PROTOCOL_IDL: target/idl/service_referral_protocol.json
+        run: |
+          npm run devnet:pre-mainnet | tee /tmp/local-pre-mainnet-validation.txt
+          grep -q 'DEVNET PRE-MAINNET COMPREHENSIVE VALIDATION: PASS' /tmp/local-pre-mainnet-validation.txt
+      - name: Execute runtime security adversarial transactions locally
+        env:
+          ANCHOR_PROVIDER_URL: http://127.0.0.1:8899
+          ANCHOR_WALLET: ~/.config/solana/id.json
+          PROTOCOL_IDL: target/idl/service_referral_protocol.json
+        run: |
+          npm run devnet:security | tee /tmp/local-security-adversarial.txt
+          grep -q 'DEVNET SECURITY ADVERSARIAL VALIDATION: PASS' /tmp/local-security-adversarial.txt
+      - name: Record local final state
+        if: always()
+        run: |
+          solana balance --url localhost | tee /tmp/local-end-balance.txt || true
+          tail -200 /tmp/solana-test-validator.log > /tmp/local-validator-tail.txt || true
+      - name: Publish non-secret local validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-pre-mainnet-comprehensive-evidence
+          path: |
+            /tmp/local-program-id.txt
+            /tmp/local-cluster-version.txt
+            /tmp/local-start-balance.txt
+            /tmp/local-end-balance.txt
+            /tmp/local-deploy.txt
+            /tmp/local-program-show.txt
+            /tmp/local-pre-mainnet-validation.txt
+            /tmp/local-security-adversarial.txt
+            /tmp/local-validator-tail.txt
+          if-no-files-found: warn

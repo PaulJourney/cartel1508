@@ -7,19 +7,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact source head
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
       - uses: solana-foundation/github-actions/setup-all@v0.2.15
         with:
           solana_version: '3.1.10'
           anchor_version: '1.1.2'
           node_version: '24'
-      - name: Verifiable production build
+      - name: Verifiable final-core production build
         working-directory: programs/service_referral_protocol
         run: anchor build --verifiable --ignore-keys -- --features production
-      - name: Hash verifiable artifact
+      - name: Hash verifiable final-core artifact
         run: sha256sum target/verifiable/service_referral_protocol.so | tee target/verifiable/service_referral_protocol.so.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: anchor-verifiable-v0.10-production
+          name: service-referral-core-v0.12-verifiable-production
           path: |
             target/verifiable/service_referral_protocol.so
             target/verifiable/service_referral_protocol.so.sha256

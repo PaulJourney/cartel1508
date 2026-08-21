@@ -12,111 +12,71 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CONSTANTS = ROOT / "programs/service_referral_protocol/src/constants.rs"
-LIB = ROOT / "programs/service_referral_protocol/src/lib.rs"
-ADAPTER_LIB = ROOT / "programs/revenue_adapter/src/lib.rs"
-VERIFIER_LIB = ROOT / "programs/revenue_verifier/src/lib.rs"
-QUALIFICATION_SPEC = ROOT / "QUALIFIED_REVENUE_QUALIFICATION_SPEC.md"
+CORE_LIB = ROOT / "programs/service_referral_protocol/src/lib.rs"
+STATE = ROOT / "programs/service_referral_protocol/src/state.rs"
+MATH = ROOT / "programs/service_referral_protocol/src/math.rs"
 ANCHOR = ROOT / "Anchor.toml"
 MANIFEST = ROOT / "release/mainnet-release.json"
 CORE_ARTIFACT = ROOT / "target/deploy/service_referral_protocol.so"
-ADAPTER_ARTIFACT = ROOT / "programs/revenue_adapter/target/deploy/revenue_adapter.so"
-VERIFIER_ARTIFACT = ROOT / "programs/revenue_verifier/target/deploy/revenue_verifier.so"
 
 EXPECTED = {
     "service_treasury": "AepYo8xanmKuRiLVeYQuCTJoQr1nyKiTApoKwHMEg8fn",
     "usdt_mint": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
     "usdc_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "economics_profile": "SELF50_NETWORK43_PIONEER2_SERVICE5",
+    "activity_profile": "ACTIVE_WEEKS_10_10_20_20_30_30_40_40_50_CAP",
+    "depth_profile": "WEEKLY_DEPTH_10U3_25U4_50U5_100U6_200U7_350U8_500U9",
+    "pioneer_position_cap": 100,
+    "pioneer_single_purchase_units": 1000,
+    "pioneer_rule_b": True,
 }
-SENTINEL = "11111111111111111111111111111111"
-DEVELOPMENT_PROGRAM_ID = "4AuoBkj4vkH2K1jwUuECtVBqF6Q74efjGbaw7btuNjRV"
-DEVELOPMENT_ADAPTER_PROGRAM_ID = "Gxf1ikEvwiusChxqj5jkQPvWhFhFw91nyYFNL6oT7ZLD"
+DEVELOPMENT_PROGRAM_IDS = {"4AuoBkj4vkH2K1jwUuECtVBqF6Q74efjGbaw7btuNjRV"}
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 ACTIONS_RUN_RE = re.compile(r"^https://github\.com/[^/]+/[^/]+/actions/runs/[0-9]+(?:/.*)?$")
+LEGACY_DEAD_PATHS = [ROOT / "scripts/revenue-adapter-static-gates.py"]
 
 
 def extract(pattern: str, text: str, label: str) -> str:
-    m = re.search(pattern, text)
-    if not m:
+    match = re.search(pattern, text)
+    if not match:
         raise RuntimeError(f"cannot parse {label}")
-    return m.group(1)
+    return match.group(1)
+
+
+def declare_id(text: str) -> str:
+    return extract(r'declare_id!\("([1-9A-HJ-NP-Za-km-z]+)"\)', text, "core declare_id")
 
 
 def sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-            h.update(chunk)
-    return h.hexdigest()
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def git_output(*args: str) -> str | None:
     try:
-        return subprocess.check_output(
-            ["git", *args], cwd=ROOT, text=True, stderr=subprocess.DEVNULL
-        ).strip()
+        return subprocess.check_output(["git", *args], cwd=ROOT, text=True, stderr=subprocess.DEVNULL).strip()
     except Exception:
         return None
 
 
 def release_source_sha() -> str | None:
-    # On pull_request workflows GitHub checks out a synthetic merge commit.
-    # If the workflow supplies the audited head SHA, prefer it; otherwise use HEAD.
-    explicit = os.environ.get("RELEASE_SOURCE_SHA", "").strip()
-    return explicit or git_output("rev-parse", "HEAD")
+    return os.environ.get("RELEASE_SOURCE_SHA", "").strip() or git_output("rev-parse", "HEAD")
 
 
 def tracked_secret_candidates() -> list[str]:
-    out = git_output("ls-files")
-    if out is None:
+    tracked = git_output("ls-files")
+    if tracked is None:
         return []
-    bad = []
-    for name in out.splitlines():
+    bad: list[str] = []
+    for name in tracked.splitlines():
         lowered = name.lower()
-        if (
-            lowered.endswith("keypair.json")
-            or "seed" in lowered
-            or "private-key" in lowered
-            or "private_key" in lowered
-        ):
+        if lowered.endswith("keypair.json") or "seed" in lowered or "private-key" in lowered or "private_key" in lowered:
             bad.append(name)
     return bad
-
-
-def qualification_status(text: str) -> str | None:
-    matches = re.findall(
-        r"^QUALIFICATION_SPEC_STATUS:\s*([A-Z_]+)\s*$",
-        text,
-        flags=re.MULTILINE,
-    )
-    if len(matches) != 1:
-        return None
-    return matches[0]
-
-
-def validate_sha_field(manifest: dict, key: str, blockers: list[str]) -> str | None:
-    value = manifest.get(key)
-    if value and not SHA256_RE.fullmatch(str(value)):
-        blockers.append(f"release manifest {key} is not a lowercase SHA-256 digest")
-        return None
-    return str(value) if value else None
-
-
-def validate_action_url(manifest: dict, key: str, blockers: list[str]) -> None:
-    value = manifest.get(key)
-    if value and not ACTIONS_RUN_RE.fullmatch(str(value)):
-        blockers.append(f"{key} is not a GitHub Actions run URL")
-
-
-def verify_local_artifact(path: Path, expected_hash: str | None, label: str, blockers: list[str], notes: list[str]) -> None:
-    if not path.exists():
-        blockers.append(f"{label} production .so is missing; exact artifact verification is mandatory")
-        return
-    if expected_hash and SHA256_RE.fullmatch(expected_hash):
-        actual = sha256_file(path)
-        if actual != expected_hash:
-            blockers.append(f"local {label} .so SHA-256 does not match release manifest")
-        else:
-            notes.append(f"{label} artifact SHA-256 verified: {actual}")
 
 
 def main() -> int:
@@ -124,136 +84,105 @@ def main() -> int:
     notes: list[str] = []
 
     constants = CONSTANTS.read_text()
-    lib = LIB.read_text()
-    adapter_lib = ADAPTER_LIB.read_text()
+    core_lib = CORE_LIB.read_text()
+    state = STATE.read_text()
+    math = MATH.read_text()
     anchor = ANCHOR.read_text()
 
-    source_program_id = extract(
-        r'declare_id!\("([1-9A-HJ-NP-Za-km-z]+)"\)', lib, "referral declare_id"
-    )
-    adapter_program_id = extract(
-        r'declare_id!\("([1-9A-HJ-NP-Za-km-z]+)"\)', adapter_lib, "adapter declare_id"
-    )
-    frozen_adapter_program_id = extract(
-        r'MAINNET_REVENUE_ADAPTER_PROGRAM: Pubkey = pubkey!\("([1-9A-HJ-NP-Za-km-z]+)"\)',
-        constants,
-        "mainnet revenue adapter Program ID",
-    )
-    frozen_verifier_program_id = extract(
-        r'MAINNET_VERIFIER_PROGRAM: Pubkey = pubkey!\("([1-9A-HJ-NP-Za-km-z]+)"\)',
-        adapter_lib,
-        "mainnet verifier Program ID",
-    )
-    treasury = extract(
-        r'MAINNET_SERVICE_TREASURY: Pubkey = pubkey!\("([1-9A-HJ-NP-Za-km-z]+)"\)',
-        constants,
-        "mainnet treasury",
-    )
-    usdt = extract(
-        r'MAINNET_USDT_MINT: Pubkey = pubkey!\("([1-9A-HJ-NP-Za-km-z]+)"\)',
-        constants,
-        "USDT mint",
-    )
-    usdc = extract(
-        r'MAINNET_USDC_MINT: Pubkey = pubkey!\("([1-9A-HJ-NP-Za-km-z]+)"\)',
-        constants,
-        "USDC mint",
-    )
-    revenue_source = extract(
-        r'MAINNET_QUALIFIED_REVENUE_SOURCE: Pubkey = pubkey!\("([1-9A-HJ-NP-Za-km-z]+)"\)',
-        constants,
-        "qualified revenue source",
-    )
+    program_id = declare_id(core_lib)
+    treasury = extract(r'MAINNET_SERVICE_TREASURY: Pubkey\s*=\s*pubkey!\("([1-9A-HJ-NP-Za-km-z]+)"\)', constants, "mainnet treasury")
+    usdt = extract(r'MAINNET_USDT_MINT: Pubkey\s*=\s*pubkey!\("([1-9A-HJ-NP-Za-km-z]+)"\)', constants, "USDT mint")
+    usdc = extract(r'MAINNET_USDC_MINT: Pubkey\s*=\s*pubkey!\("([1-9A-HJ-NP-Za-km-z]+)"\)', constants, "USDC mint")
     registration_open = int(
         extract(
-            r'MAINNET_REGISTRATION_OPEN_AT: i64 = (-?\d+)',
+            r'MAINNET_REGISTRATION_OPEN_AT: i64 = (-?[0-9][0-9_]*)',
             constants,
             "registration open timestamp",
-        )
+        ).replace("_", "")
     )
 
-    verifier_program_id: str | None = None
-    if not VERIFIER_LIB.exists():
-        blockers.append("production revenue verifier source is missing")
+    for field, actual in (("service_treasury", treasury), ("usdt_mint", usdt), ("usdc_mint", usdc)):
+        if actual != EXPECTED[field]:
+            blockers.append(f"{field} mismatch: {actual}")
+
+    if program_id in DEVELOPMENT_PROGRAM_IDS:
+        blockers.append("core Program ID is still a development identity")
+
+    if 'PURCHASE_NETWORK_LEVEL_BPS: [u64; 9]' not in constants or '[1_500, 900, 600, 400, 250, 200, 150, 100, 200]' not in constants:
+        blockers.append("final nine-upline 43% production schedule is not frozen")
+    if 'split_purchase_amount(payment)' not in core_lib:
+        blockers.append("purchase_and_distribute is not using the final purchase split")
+    if 'for i in 1..9' not in core_lib or 'pub upline_8:' not in core_lib or 'pub upline_9:' in core_lib:
+        blockers.append("production referral traversal is not frozen to sponsor plus eight ancestors")
+    if 'ACTIVE_WEEK_REQUIREMENT_UNITS: [u64; 5] = [10, 20, 30, 40, 50]' not in constants or 'ACTIVE_WEEK_TIER_SPAN: u32 = 2' not in constants:
+        blockers.append("progressive ACTIVE weekly schedule is not frozen")
+    if 'NETWORK_DEPTH_UNIT_THRESHOLDS: [u64; 7] = [10, 25, 50, 100, 200, 350, 500]' not in constants:
+        blockers.append("weekly U1-U9 depth schedule is not frozen")
+    if 'pub active_weeks_started: u32' not in state or 'pub current_week_units: u64' not in state:
+        blockers.append("weekly activity/depth state is missing")
+    if 'distribute_network_level(' not in core_lib or 'network_depth_for_units(user.current_week_units)' not in core_lib:
+        blockers.append("network payouts are not gated by weekly personal-unit depth")
+    if 'let pioneer = pioneer_due(user, p, mint)?' not in core_lib or 'preserve_self_and_pioneer' in core_lib:
+        blockers.append("Pioneer is not strictly ACTIVE/GRACE-gated after inactivity")
+
+    if 'PIONEER_SLOTS: u16 = 100' not in constants:
+        blockers.append("Pioneer global position cap is not frozen to 100")
+    if 'PIONEER_POSITION_PURCHASE_UNITS: u64 = 1_000' not in constants:
+        blockers.append("Pioneer single-purchase threshold is not frozen to 1000 units")
+    if 'pub fn pioneer_positions_for_purchase' not in math:
+        blockers.append("Pioneer purchase-position calculator is missing")
     else:
-        verifier_lib = VERIFIER_LIB.read_text()
-        try:
-            verifier_program_id = extract(
-                r'declare_id!\("([1-9A-HJ-NP-Za-km-z]+)"\)',
-                verifier_lib,
-                "verifier declare_id",
-            )
-        except RuntimeError as exc:
-            blockers.append(str(exc))
+        if 'units / PIONEER_POSITION_PURCHASE_UNITS' not in math:
+            blockers.append("Pioneer positions are not derived from one purchase only")
+        if 'requested.min(remaining)' not in math or 'already_assigned >= PIONEER_SLOTS' not in math:
+            blockers.append("Pioneer purchase-position calculator does not enforce the absolute 100 cap")
+    if 'pub pioneer_positions_assigned: u16' not in state or 'pub pioneer_positions: u16' not in state:
+        blockers.append("weighted Pioneer position state is not present")
+    if 'pioneer_id' in state or 'pioneer_id' in core_lib:
+        blockers.append("legacy one-Pioneer-ID-per-registration state remains")
+    if 'u.pioneer_positions = 0' not in core_lib:
+        blockers.append("registration does not explicitly start with zero Pioneer positions")
+    accrue_at = core_lib.find('let pioneer_unassigned = accrue_pioneer')
+    assign_at = core_lib.find('assign_pioneer_positions_after_purchase')
+    if accrue_at < 0 or assign_at < 0 or accrue_at >= assign_at:
+        blockers.append("Pioneer Rule B is not frozen: current-event accrual must precede new-position assignment")
+    if 'checked_mul(user.pioneer_positions as u128)' not in core_lib:
+        blockers.append("Pioneer entitlement is not weighted by wallet position count")
 
-    qualification_spec_hash: str | None = None
-    if not QUALIFICATION_SPEC.exists():
-        blockers.append("qualified-revenue product qualification specification is missing")
-    else:
-        qualification_text = QUALIFICATION_SPEC.read_text()
-        status = qualification_status(qualification_text)
-        if status is None:
-            blockers.append("qualified-revenue product qualification specification has invalid or duplicate status marker")
-        elif status != "FINAL":
-            blockers.append("qualified-revenue product qualification specification is not FINAL")
-        qualification_spec_hash = sha256_file(QUALIFICATION_SPEC)
-        notes.append(f"qualification specification SHA-256: {qualification_spec_hash}")
+    if 'pub struct UnitsPurchased' not in core_lib or 'emit!(UnitsPurchased' not in core_lib:
+        blockers.append("purchase unit ranges are not emitted as the final event-based audit trail")
+    if 'pub pioneer_positions_added: u16' not in core_lib or 'pub pioneer_positions_total: u16' not in core_lib:
+        blockers.append("purchase event does not expose Pioneer position additions/total")
+    purchase_accounts = core_lib.split('pub struct PurchaseAndDistribute', 1)[1].split('pub struct SettleExpired', 1)[0]
+    if 'UnitBatch' in core_lib or 'pub batch:' in purchase_accounts or 'pub system_program' in purchase_accounts:
+        blockers.append("purchase still carries a per-purchase rent/account-creation surface")
 
-    if treasury != EXPECTED["service_treasury"]:
-        blockers.append(f"treasury mismatch: {treasury}")
-    if usdt != EXPECTED["usdt_mint"]:
-        blockers.append(f"USDT mint mismatch: {usdt}")
-    if usdc != EXPECTED["usdc_mint"]:
-        blockers.append(f"USDC mint mismatch: {usdc}")
-
-    if source_program_id == DEVELOPMENT_PROGRAM_ID:
-        blockers.append("Program ID is still the development identity")
-    if adapter_program_id == DEVELOPMENT_ADAPTER_PROGRAM_ID:
-        blockers.append("Revenue Adapter Program ID is still the development identity")
-    if frozen_adapter_program_id == SENTINEL:
-        blockers.append("revenue adapter Program ID is still the fail-closed sentinel")
-    elif frozen_adapter_program_id != adapter_program_id:
-        blockers.append("core frozen Revenue Adapter Program ID does not match adapter declare_id!")
-
-    if frozen_verifier_program_id == SENTINEL:
-        blockers.append("revenue verifier Program ID is still the fail-closed sentinel")
-    elif verifier_program_id and frozen_verifier_program_id != verifier_program_id:
-        blockers.append("adapter frozen verifier Program ID does not match verifier declare_id!")
-
-    identities = [source_program_id, adapter_program_id]
-    if verifier_program_id:
-        identities.append(verifier_program_id)
-    if len(identities) != len(set(identities)):
-        blockers.append("referral, adapter and verifier Program IDs must be distinct")
-
-    if revenue_source == SENTINEL:
-        blockers.append("qualified revenue source is still the fail-closed sentinel")
-    else:
-        forbidden_sources = {
-            treasury: "service treasury",
-            source_program_id: "referral Program ID",
-            adapter_program_id: "Revenue Adapter Program ID",
-        }
-        if verifier_program_id:
-            forbidden_sources[verifier_program_id] = "verifier Program ID"
-        if revenue_source in forbidden_sources:
-            blockers.append(
-                f"qualified revenue source must not equal the {forbidden_sources[revenue_source]}"
-            )
+    legacy_markers = [
+        'purchase_service_units',
+        'record_qualified_revenue',
+        'RecordQualifiedRevenue',
+        'qualified_revenue_source',
+        'MAINNET_QUALIFIED_REVENUE_SOURCE',
+        'MAINNET_REVENUE_ADAPTER_PROGRAM',
+        'LegacyRevenuePathDisabled',
+    ]
+    for marker in legacy_markers:
+        if marker in core_lib or marker in state or marker in constants:
+            blockers.append(f"legacy revenue marker remains in final core: {marker}")
+    for legacy_path in LEGACY_DEAD_PATHS:
+        if legacy_path.exists():
+            blockers.append(f"obsolete legacy release tooling remains tracked: {legacy_path.relative_to(ROOT)}")
 
     if registration_open <= 0:
         blockers.append("registration_open_at is not frozen to a positive UTC unix timestamp")
     elif registration_open <= int(time.time()):
         blockers.append("registration_open_at is not in the future")
 
-    mainnet_match = re.search(
-        r'\[programs\.mainnet\][\s\S]*?service_referral_protocol\s*=\s*"([1-9A-HJ-NP-Za-km-z]+)"',
-        anchor,
-    )
+    mainnet_match = re.search(r'\[programs\.mainnet\][\s\S]*?service_referral_protocol\s*=\s*"([1-9A-HJ-NP-Za-km-z]+)"', anchor)
     if not mainnet_match:
         blockers.append("Anchor.toml has no [programs.mainnet] Program ID")
-    elif mainnet_match.group(1) != source_program_id:
-        blockers.append("Anchor.toml mainnet Program ID does not match declare_id!")
+    elif mainnet_match.group(1) != program_id:
+        blockers.append("Anchor.toml mainnet Program ID does not match core declare_id!")
 
     tracked = tracked_secret_candidates()
     if tracked:
@@ -273,6 +202,7 @@ def main() -> int:
 
     if not MANIFEST.exists():
         blockers.append("release/mainnet-release.json is missing")
+        manifest: dict = {}
     else:
         try:
             manifest = json.loads(MANIFEST.read_text())
@@ -280,93 +210,91 @@ def main() -> int:
             blockers.append(f"release manifest is invalid JSON: {exc}")
             manifest = {}
 
-        required = [
-            "commit_sha",
-            "program_id",
-            "revenue_adapter_program_id",
-            "verifier_program_id",
-            "qualified_revenue_source",
-            "registration_open_at",
-            "service_treasury",
-            "usdt_mint",
-            "usdc_mint",
-            "so_sha256",
-            "adapter_so_sha256",
-            "verifier_so_sha256",
-            "qualification_spec_sha256",
-            "audit_report_sha256",
-            "verified_build_run_url",
-            "adapter_verified_build_run_url",
-            "verifier_verified_build_run_url",
-            "audit_status",
-            "smoke_test_plan_approved",
-        ]
-        for key in required:
-            value = manifest.get(key)
-            if value in (None, "", 0, False):
-                blockers.append(f"release manifest field not frozen: {key}")
+    required = [
+        "commit_sha", "program_id", "registration_open_at", "service_treasury",
+        "usdt_mint", "usdc_mint", "economics_profile", "activity_profile", "depth_profile",
+        "pioneer_position_cap", "pioneer_single_purchase_units", "pioneer_rule_b", "so_sha256",
+        "audit_report_sha256", "protocol_ci_run_url", "rustsec_run_url", "verified_build_run_url",
+        "devnet_comprehensive_source_sha", "devnet_comprehensive_run_url",
+        "devnet_comprehensive_evidence_sha256", "devnet_comprehensive_status",
+        "production_runtime_source_sha", "production_runtime_run_url",
+        "production_runtime_evidence_sha256", "production_runtime_status",
+        "audit_status", "smoke_test_plan_approved",
+    ]
+    for key in required:
+        if manifest.get(key) in (None, "", 0, False):
+            blockers.append(f"release manifest field not frozen: {key}")
 
-        expected_manifest = {
-            "program_id": source_program_id,
-            "revenue_adapter_program_id": adapter_program_id,
-            "verifier_program_id": verifier_program_id,
-            "qualified_revenue_source": revenue_source,
-            "registration_open_at": registration_open,
-            **EXPECTED,
-        }
-        for key, expected in expected_manifest.items():
-            if manifest.get(key) != expected:
-                blockers.append(f"release manifest {key} does not match frozen source")
+    expected_manifest = {
+        "program_id": program_id,
+        "registration_open_at": registration_open,
+        **EXPECTED,
+    }
+    for key, expected in expected_manifest.items():
+        if manifest.get(key) != expected:
+            blockers.append(f"release manifest {key} does not match frozen source/economics")
 
-        if qualification_spec_hash and manifest.get("qualification_spec_sha256") != qualification_spec_hash:
-            blockers.append("release manifest qualification_spec_sha256 does not match local FINAL specification")
+    if source_sha and manifest.get("commit_sha") != source_sha:
+        blockers.append("release manifest commit_sha does not match release source SHA")
+    if source_sha and manifest.get("production_runtime_source_sha") != source_sha:
+        blockers.append("production runtime evidence is not bound to the final release source SHA")
 
-        manifest_commit = manifest.get("commit_sha")
-        if source_sha and manifest_commit != source_sha:
-            blockers.append("release manifest commit_sha does not match release source SHA")
+    for key in ("devnet_comprehensive_source_sha", "production_runtime_source_sha"):
+        value = manifest.get(key)
+        if value and not GIT_SHA_RE.fullmatch(str(value)):
+            blockers.append(f"release manifest {key} is not a lowercase 40-hex git SHA")
 
-        core_hash = validate_sha_field(manifest, "so_sha256", blockers)
-        adapter_hash = validate_sha_field(manifest, "adapter_so_sha256", blockers)
-        verifier_hash = validate_sha_field(manifest, "verifier_so_sha256", blockers)
-        validate_sha_field(manifest, "qualification_spec_sha256", blockers)
-        validate_sha_field(manifest, "audit_report_sha256", blockers)
+    for key in (
+        "so_sha256", "audit_report_sha256", "devnet_comprehensive_evidence_sha256",
+        "production_runtime_evidence_sha256",
+    ):
+        value = manifest.get(key)
+        if value and not SHA256_RE.fullmatch(str(value)):
+            blockers.append(f"release manifest {key} is not a lowercase SHA-256 digest")
 
-        validate_action_url(manifest, "verified_build_run_url", blockers)
-        validate_action_url(manifest, "adapter_verified_build_run_url", blockers)
-        validate_action_url(manifest, "verifier_verified_build_run_url", blockers)
+    for key in (
+        "protocol_ci_run_url", "rustsec_run_url", "verified_build_run_url",
+        "devnet_comprehensive_run_url", "production_runtime_run_url",
+    ):
+        value = manifest.get(key)
+        if value and not ACTIONS_RUN_RE.fullmatch(str(value)):
+            blockers.append(f"{key} is not a GitHub Actions run URL")
 
-        if manifest.get("audit_status") != "passed":
-            blockers.append("independent audit status is not 'passed'")
-        if manifest.get("smoke_test_plan_approved") is not True:
-            blockers.append("mainnet smoke-test plan is not approved")
+    if manifest.get("devnet_comprehensive_status") != "passed":
+        blockers.append("final Devnet comprehensive status is not 'passed'")
+    if manifest.get("production_runtime_status") != "passed":
+        blockers.append("final production-runtime validation status is not 'passed'")
+    if manifest.get("audit_status") != "passed":
+        blockers.append("independent audit status is not 'passed'")
+    if manifest.get("smoke_test_plan_approved") is not True:
+        blockers.append("mainnet smoke-test plan is not approved")
 
-        verify_local_artifact(CORE_ARTIFACT, core_hash, "referral", blockers, notes)
-        verify_local_artifact(ADAPTER_ARTIFACT, adapter_hash, "Revenue Adapter", blockers, notes)
-        verify_local_artifact(VERIFIER_ARTIFACT, verifier_hash, "revenue verifier", blockers, notes)
+    expected_so_hash = manifest.get("so_sha256")
+    if not CORE_ARTIFACT.exists():
+        blockers.append("core production .so is missing; exact artifact verification is mandatory")
+    elif expected_so_hash and SHA256_RE.fullmatch(str(expected_so_hash)):
+        actual = sha256_file(CORE_ARTIFACT)
+        if actual != expected_so_hash:
+            blockers.append("local core .so SHA-256 does not match release manifest")
+        else:
+            notes.append(f"core artifact SHA-256 verified: {actual}")
 
     print("=== PRE-MAINNET GATE ===")
-    print(f"Referral Program ID: {source_program_id}")
-    print(f"Adapter Program ID:  {adapter_program_id}")
-    print(f"Verifier Program ID: {verifier_program_id or '<missing>'}")
-    print(f"Treasury:            {treasury}")
-    print(f"USDT mint:           {usdt}")
-    print(f"USDC mint:           {usdc}")
-    print(f"RevenueAuthority:    {revenue_source}")
-    print(f"Open UTC:            {registration_open}")
+    print(f"Core Program ID:       {program_id}")
+    print(f"Registration opens:    {registration_open}")
+    print(f"Service treasury:      {treasury}")
+    print(f"USDT mint:             {usdt}")
+    print(f"USDC mint:             {usdc}")
     for note in notes:
-        print(f"NOTE  {note}")
+        print(f"NOTE: {note}")
 
     if blockers:
-        for item in blockers:
-            print(f"BLOCK {item}")
-        print(f"RESULT: BLOCKED ({len(blockers)} blocker(s))")
+        print("\nBLOCKED:")
+        for blocker in blockers:
+            print(f"- {blocker}")
         return 1
 
-    print("RESULT: READY FOR CONTROLLED MAINNET DEPLOYMENT")
-    print(
-        "WARNING: this does NOT authorize removal of any upgrade authority. "
-        "Finalization comes only after deployed-bytecode verification and limited mainnet smoke tests for the complete verifier -> adapter -> referral chain."
-    )
+    print("\nPASS: final release gate is green")
     return 0
 
 

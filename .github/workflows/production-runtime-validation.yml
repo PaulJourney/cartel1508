@@ -1,0 +1,119 @@
+name: production-runtime-validation
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  exact-production-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    env:
+      FINAL_PROGRAM_ID: DA214e5LFbj1WARXzu89k295azhKCGMFcVicsm7CsfpL
+      MAINNET_USDT_MINT: Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB
+      MAINNET_USDC_MINT: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
+      EXPECTED_PRODUCTION_SO_SHA256: 0c632adebe065b56c5697d0ee9879d93977d10b55e3d554a17a4641ee1533369
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact source head
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          printf '%s\n' "$EXPECTED_SOURCE_SHA" | tee /tmp/production-runtime-source-head.txt
+      - uses: solana-foundation/github-actions/setup-all@v0.2.15
+        with:
+          solana_version: '3.1.10'
+          anchor_version: '1.1.2'
+          node_version: '24'
+      - name: Create disposable local payer
+        run: |
+          mkdir -p ~/.config/solana
+          solana-keygen new --no-bip39-passphrase --silent --force -o ~/.config/solana/id.json
+      - name: Build exact verifiable production artifact
+        run: |
+          cargo-build-sbf --install-only
+          anchor build --verifiable --ignore-keys -- --features production
+          test -s target/verifiable/service_referral_protocol.so
+          test -s target/idl/service_referral_protocol.json
+          node --check scripts/production-runtime-validation.mjs
+          sha256sum target/verifiable/service_referral_protocol.so | tee /tmp/production-runtime-so.sha256
+          ACTUAL_SHA="$(sha256sum target/verifiable/service_referral_protocol.so | awk '{print $1}')"
+          test "$ACTUAL_SHA" = "$EXPECTED_PRODUCTION_SO_SHA256"
+          node - <<'NODE'
+          const fs = require('fs');
+          const idl = JSON.parse(fs.readFileSync('target/idl/service_referral_protocol.json', 'utf8'));
+          const expected = process.env.FINAL_PROGRAM_ID;
+          if (idl.address !== expected) {
+            throw new Error(`production IDL address ${idl.address} != ${expected}`);
+          }
+          NODE
+      - name: Start exact-identity production validator
+        run: |
+          set -o pipefail
+          solana config set --url localhost
+          rm -rf /tmp/solana-production-runtime-ledger
+          nohup solana-test-validator \
+            --ledger /tmp/solana-production-runtime-ledger \
+            --reset \
+            --quiet \
+            --url mainnet-beta \
+            --clone "$MAINNET_USDT_MINT" \
+            --clone "$MAINNET_USDC_MINT" \
+            --bpf-program "$FINAL_PROGRAM_ID" target/verifiable/service_referral_protocol.so \
+            > /tmp/production-runtime-validator.log 2>&1 &
+          echo $! > /tmp/production-runtime-validator.pid
+          READY=false
+          for attempt in $(seq 1 90); do
+            if solana cluster-version --url localhost >/tmp/production-runtime-cluster-version.txt 2>&1; then
+              READY=true
+              break
+            fi
+            if ! kill -0 "$(cat /tmp/production-runtime-validator.pid)" 2>/dev/null; then
+              cat /tmp/production-runtime-validator.log
+              exit 1
+            fi
+            sleep 1
+          done
+          test "$READY" = "true"
+          solana airdrop 1000 --url localhost
+          solana program show "$FINAL_PROGRAM_ID" --url localhost | tee /tmp/production-runtime-program-show.txt
+          solana account "$MAINNET_USDT_MINT" --url localhost --output json > /tmp/production-runtime-usdt-account.json
+          solana account "$MAINNET_USDC_MINT" --url localhost --output json > /tmp/production-runtime-usdc-account.json
+      - name: Install pinned runtime-client dependencies
+        run: npm install --no-audit --no-fund --ignore-scripts
+      - name: Execute exact frozen production runtime validation
+        env:
+          ANCHOR_PROVIDER_URL: http://127.0.0.1:8899
+          ANCHOR_WALLET: ~/.config/solana/id.json
+          PROTOCOL_IDL: target/idl/service_referral_protocol.json
+        run: |
+          set -o pipefail
+          npm run production:runtime | tee /tmp/production-runtime-validation.txt
+          grep -q 'PRODUCTION RUNTIME EXACT-IDENTITY VALIDATION: PASS' /tmp/production-runtime-validation.txt
+      - name: Record validator evidence
+        if: always()
+        run: |
+          solana program show "$FINAL_PROGRAM_ID" --url localhost > /tmp/production-runtime-program-show-final.txt 2>&1 || true
+          tail -300 /tmp/production-runtime-validator.log > /tmp/production-runtime-validator-tail.txt 2>&1 || true
+          if [ -f /tmp/production-runtime-validator.pid ]; then
+            kill "$(cat /tmp/production-runtime-validator.pid)" 2>/dev/null || true
+          fi
+      - name: Publish non-secret production runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-runtime-exact-identity-evidence
+          path: |
+            /tmp/production-runtime-source-head.txt
+            /tmp/production-runtime-so.sha256
+            /tmp/production-runtime-cluster-version.txt
+            /tmp/production-runtime-program-show.txt
+            /tmp/production-runtime-program-show-final.txt
+            /tmp/production-runtime-usdt-account.json
+            /tmp/production-runtime-usdc-account.json
+            /tmp/production-runtime-validation.txt
+            /tmp/production-runtime-validator-tail.txt
+          if-no-files-found: warn

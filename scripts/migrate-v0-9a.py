@@ -79,7 +79,7 @@ replacement = r'''fn accrue_pioneer(p: &mut ProtocolState, mint: Pubkey, amount:
     let per_share_scaled = (amount as u128)
         .checked_mul(PIONEER_SCALE).ok_or(ProtocolError::ArithmeticOverflow)?
         .checked_div(PIONEER_SLOTS as u128).ok_or(ProtocolError::ArithmeticUnderflow)?;
-    let unassigned = (PIONEER_SLOTS - p.pioneer_count) as u128;
+    let unassigned = (PIONEER_SLOTS - p.pioneer_positions_assigned) as u128;
     let unassigned_scaled = per_share_scaled.checked_mul(unassigned).ok_or(ProtocolError::ArithmeticOverflow)?;
 
     let remainder_scaled = if mint == p.usdt_mint {
@@ -105,7 +105,7 @@ replacement = r'''fn accrue_pioneer(p: &mut ProtocolState, mint: Pubkey, amount:
 }
 
 fn pioneer_due(user: &UserState, p: &ProtocolState, mint: Pubkey) -> Result<u64> {
-    if user.pioneer_id == 0 { return Ok(0); }
+    if user.pioneer_positions == 0 { return Ok(0); }
     let (idx, checkpoint) = if mint == p.usdt_mint {
         (p.pioneer_index_usdt, user.pioneer_checkpoint_usdt)
     } else if mint == p.usdc_mint {
@@ -117,7 +117,7 @@ fn pioneer_due(user: &UserState, p: &ProtocolState, mint: Pubkey) -> Result<u64>
 }
 
 fn checkpoint_pioneer_claimed(user: &mut UserState, p: &ProtocolState, mint: Pubkey, claimed: u64) -> Result<()> {
-    if user.pioneer_id == 0 || claimed == 0 { return Ok(()); }
+    if user.pioneer_positions == 0 || claimed == 0 { return Ok(()); }
     let advance_scaled = (claimed as u128).checked_mul(PIONEER_SCALE).ok_or(ProtocolError::ArithmeticOverflow)?;
     if mint == p.usdt_mint {
         user.pioneer_checkpoint_usdt = user.pioneer_checkpoint_usdt.checked_add(advance_scaled).ok_or(ProtocolError::ArithmeticOverflow)?;
