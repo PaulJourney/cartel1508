@@ -2,6 +2,11 @@ name: audit-production-post-open-runtime
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - audit/production-post-open-runtime
+    paths:
+      - .github/workflows/audit-production-post-open.yml
 
 permissions:
   contents: read
