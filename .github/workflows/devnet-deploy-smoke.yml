@@ -56,31 +56,23 @@ jobs:
           solana_version: '3.1.10'
           anchor_version: '1.1.2'
           node_version: '24'
-      - name: Configure devnet identities
+      - name: Configure persistent devnet identity and temporary program identity
         run: |
+          set -euo pipefail
+          test -n "${DEVNET_DEPLOYER_KEYPAIR_JSON:-}" || { echo 'DEVNET_DEPLOYER_KEYPAIR_JSON is required'; exit 1; }
           solana config set --url devnet
           mkdir -p ~/.config/solana target/deploy
-
-          if [ -n "${DEVNET_DEPLOYER_KEYPAIR_JSON:-}" ]; then
-            printf '%s' "$DEVNET_DEPLOYER_KEYPAIR_JSON" > ~/.config/solana/id.json
-            chmod 600 ~/.config/solana/id.json
-            echo "Using secret-backed devnet deployer keypair."
-            echo "EPHEMERAL_DEVNET_DEPLOYER=false" >> "$GITHUB_ENV"
-          else
-            solana-keygen new --no-bip39-passphrase --silent --force -o ~/.config/solana/id.json
-            chmod 600 ~/.config/solana/id.json
-            echo "Using ephemeral devnet deployer keypair generated only for this runner."
-            echo "EPHEMERAL_DEVNET_DEPLOYER=true" >> "$GITHUB_ENV"
-          fi
+          printf '%s' "$DEVNET_DEPLOYER_KEYPAIR_JSON" > ~/.config/solana/id.json
+          chmod 600 ~/.config/solana/id.json
+          DEPLOYER="$(solana-keygen pubkey ~/.config/solana/id.json)"
+          echo "DEVNET_DEPLOYER_PUBKEY=$DEPLOYER" >> "$GITHUB_ENV"
+          printf '%s\n' "$DEPLOYER" | tee /tmp/devnet-deployer-pubkey.txt
+          echo "::notice title=Persistent Devnet deployer::$DEPLOYER"
 
           solana-keygen new --no-bip39-passphrase --silent --force -o target/deploy/service_referral_protocol-keypair.json
           PROGRAM_ID="$(solana-keygen pubkey target/deploy/service_referral_protocol-keypair.json)"
           echo "PROGRAM_ID=$PROGRAM_ID" >> "$GITHUB_ENV"
-          DEPLOYER="$(solana-keygen pubkey ~/.config/solana/id.json)"
-          echo "DEVNET_DEPLOYER_PUBKEY=$DEPLOYER" >> "$GITHUB_ENV"
           printf '%s\n' "$PROGRAM_ID" | tee /tmp/devnet-program-id.txt
-          printf '%s\n' "$DEPLOYER" | tee /tmp/devnet-deployer-pubkey.txt
-          echo "::notice title=Devnet deployer public address::$DEPLOYER"
 
           python3 - "$PROGRAM_ID" <<'PY'
           from pathlib import Path
@@ -88,78 +80,59 @@ jobs:
           new_id = sys.argv[1]
           mainnet_id = 'DA214e5LFbj1WARXzu89k295azhKCGMFcVicsm7CsfpL'
           development_id = '4AuoBkj4vkH2K1jwUuECtVBqF6Q74efjGbaw7btuNjRV'
-
           lib_path = Path('programs/service_referral_protocol/src/lib.rs')
           lib_text = lib_path.read_text()
           if lib_text.count(mainnet_id) != 1:
               raise SystemExit('expected frozen Mainnet Program ID missing or duplicated in lib.rs')
           lib_path.write_text(lib_text.replace(mainnet_id, new_id, 1))
-
           anchor_path = Path('Anchor.toml')
           anchor_text = anchor_path.read_text()
           if development_id not in anchor_text or mainnet_id not in anchor_text:
               raise SystemExit('expected frozen development/mainnet mappings missing in Anchor.toml')
           anchor_path.write_text(anchor_text.replace(development_id, new_id).replace(mainnet_id, new_id))
           PY
-
           git diff --check
           git diff --name-only | sort | tee /tmp/devnet-runtime-changed-files.txt
           printf '%s\n' 'Anchor.toml' 'programs/service_referral_protocol/src/lib.rs' | sort > /tmp/devnet-runtime-expected-files.txt
           diff -u /tmp/devnet-runtime-expected-files.txt /tmp/devnet-runtime-changed-files.txt
           git diff -- Anchor.toml programs/service_referral_protocol/src/lib.rs > /tmp/devnet-runtime-program-id.diff
-      - name: Publish public funding address immediately
-        uses: actions/upload-artifact@v4
-        with:
-          name: devnet-pre-mainnet-funding-address
-          path: /tmp/devnet-deployer-pubkey.txt
-          if-no-files-found: error
-          retention-days: 1
-      - name: Reclaim stale devnet buffers
+      - name: Reclaim stale temporary programs and buffers owned by persistent deployer
         run: |
-          set -o pipefail
+          set -euo pipefail
+          solana program show --programs --url devnet | tee /tmp/devnet-programs-before.txt || true
+          : > /tmp/devnet-stale-program-close.txt
+          solana program show --programs --url devnet 2>/dev/null \
+            | awk -F'|' 'NR>2 {gsub(/^[ \t]+|[ \t]+$/, "", $1); if ($1 != "") print $1}' \
+            | while read -r STALE_PROGRAM_ID; do
+                echo "Closing stale temporary program $STALE_PROGRAM_ID" | tee -a /tmp/devnet-stale-program-close.txt
+                solana program close "$STALE_PROGRAM_ID" --bypass-warning --url devnet \
+                  | tee -a /tmp/devnet-stale-program-close.txt || true
+              done
           solana program show --buffers --url devnet | tee /tmp/devnet-buffers-before.txt || true
           solana program close --buffers --url devnet | tee /tmp/devnet-stale-buffer-close.txt || true
-          solana balance --url devnet | tee /tmp/devnet-post-stale-buffer-balance.txt
-      - name: Ensure deployer has enough devnet SOL
+          solana balance --url devnet | tee /tmp/devnet-post-stale-reclaim-balance.txt
+      - name: Ensure persistent deployer has enough devnet SOL
         run: |
+          set -euo pipefail
           REQUIRED_LAMPORTS=4000000000
           BALANCE_LAMPORTS="$(solana balance --lamports --url devnet | awk '{print $1}')"
           if [ "$BALANCE_LAMPORTS" -lt "$REQUIRED_LAMPORTS" ]; then
-            for amount in 5 2 1; do
+            for amount in 2 1; do
               solana airdrop "$amount" --url devnet || true
               BALANCE_LAMPORTS="$(solana balance --lamports --url devnet | awk '{print $1}')"
-              if [ "$BALANCE_LAMPORTS" -ge "$REQUIRED_LAMPORTS" ]; then
-                break
-              fi
+              [ "$BALANCE_LAMPORTS" -ge "$REQUIRED_LAMPORTS" ] && break
               sleep 5
             done
           fi
-
-          if [ "$BALANCE_LAMPORTS" -lt "$REQUIRED_LAMPORTS" ] && [ "${EPHEMERAL_DEVNET_DEPLOYER:-false}" = "true" ]; then
-            echo "Public faucet unavailable/rate-limited or insufficient for comprehensive validation."
-            echo "DEVNET FUNDING REQUIRED: bring ${DEVNET_DEPLOYER_PUBKEY} to at least 4 devnet SOL."
-            echo "Only the public address is published; the private key exists only on this runner."
-            for attempt in $(seq 1 180); do
-              BALANCE_LAMPORTS="$(solana balance --lamports --url devnet | awk '{print $1}')"
-              if [ "$BALANCE_LAMPORTS" -ge "$REQUIRED_LAMPORTS" ]; then
-                echo "External devnet funding detected."
-                break
-              fi
-              if [ $((attempt % 6)) -eq 0 ]; then
-                echo "Still waiting for devnet funding at ${DEVNET_DEPLOYER_PUBKEY}; current ${BALANCE_LAMPORTS} lamports."
-              fi
-              sleep 10
-            done
-          fi
-
           echo "devnet deployer balance: ${BALANCE_LAMPORTS} lamports"
           if [ "$BALANCE_LAMPORTS" -lt "$REQUIRED_LAMPORTS" ]; then
-            echo "DEVNET FUNDING BLOCKED: deployer did not reach 4 devnet SOL."
+            echo "DEVNET FUNDING BLOCKED: persistent deployer did not reach 4 devnet SOL."
             exit 1
           fi
           solana balance --url devnet | tee /tmp/devnet-start-balance.txt
       - name: Build temporary-ID program
         run: |
+          set -euo pipefail
           cargo-build-sbf --install-only
           anchor build --ignore-keys
           test -s target/deploy/service_referral_protocol.so
@@ -175,7 +148,7 @@ jobs:
           printf 'program_so_len=%s\nprogram_max_len=%s\n' "$PROGRAM_SO_LEN" "$PROGRAM_MAX_LEN" | tee /tmp/devnet-program-sizing.txt
       - name: Deploy to devnet
         run: |
-          set -o pipefail
+          set -euo pipefail
           solana program deploy target/deploy/service_referral_protocol.so \
             --program-id target/deploy/service_referral_protocol-keypair.json \
             --max-len "$PROGRAM_MAX_LEN" \
@@ -189,7 +162,7 @@ jobs:
           ANCHOR_WALLET: ~/.config/solana/id.json
           PROTOCOL_IDL: target/idl/service_referral_protocol.json
         run: |
-          set -o pipefail
+          set -euo pipefail
           npm run devnet:pre-mainnet | tee /tmp/devnet-pre-mainnet-validation.txt
           grep -q 'DEVNET PRE-MAINNET COMPREHENSIVE VALIDATION: PASS' /tmp/devnet-pre-mainnet-validation.txt
       - name: Execute runtime security adversarial validation
@@ -198,17 +171,17 @@ jobs:
           ANCHOR_WALLET: ~/.config/solana/id.json
           PROTOCOL_IDL: target/idl/service_referral_protocol.json
         run: |
-          set -o pipefail
+          set -euo pipefail
           npm run devnet:security | tee /tmp/devnet-security-adversarial.txt
           grep -q 'DEVNET SECURITY ADVERSARIAL VALIDATION: PASS' /tmp/devnet-security-adversarial.txt
-      - name: Reclaim temporary devnet program rent and buffers
+      - name: Reclaim current temporary devnet program and buffers
         if: always()
         run: |
           set -o pipefail
           if [ -n "${PROGRAM_ID:-}" ] && solana program show "$PROGRAM_ID" --url devnet >/dev/null 2>&1; then
             solana program close "$PROGRAM_ID" --bypass-warning --url devnet | tee /tmp/devnet-program-close.txt || true
           else
-            echo "No deployed temporary program to close." | tee /tmp/devnet-program-close.txt
+            echo "No deployed current temporary program to close." | tee /tmp/devnet-program-close.txt
           fi
           solana program close --buffers --url devnet | tee /tmp/devnet-buffer-close.txt || true
       - name: Record final deployer balance
@@ -226,9 +199,11 @@ jobs:
             /tmp/devnet-runtime-so.sha256
             /tmp/devnet-program-id.txt
             /tmp/devnet-deployer-pubkey.txt
+            /tmp/devnet-programs-before.txt
+            /tmp/devnet-stale-program-close.txt
             /tmp/devnet-buffers-before.txt
             /tmp/devnet-stale-buffer-close.txt
-            /tmp/devnet-post-stale-buffer-balance.txt
+            /tmp/devnet-post-stale-reclaim-balance.txt
             /tmp/devnet-start-balance.txt
             /tmp/devnet-program-sizing.txt
             /tmp/devnet-deploy.txt
