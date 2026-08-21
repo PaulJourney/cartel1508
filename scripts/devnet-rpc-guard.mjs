@@ -1,3 +1,5 @@
+import { Connection } from "@solana/web3.js";
+
 const nativeFetch = globalThis.fetch?.bind(globalThis);
 
 if (!nativeFetch) {
@@ -9,6 +11,9 @@ const MIN_INTERVAL_MS = Number(process.env.DEVNET_RPC_MIN_INTERVAL_MS || 450);
 const MAX_RETRIES = Number(process.env.DEVNET_RPC_MAX_RETRIES || 18);
 const NULL_ACCOUNT_RETRIES = Number(process.env.DEVNET_NULL_ACCOUNT_RETRIES || 12);
 const BLOCKHASH_RETRIES = Number(process.env.DEVNET_BLOCKHASH_RETRIES || 0);
+const TRANSACTION_BLOCKHASH_RETRIES = Number(
+  process.env.DEVNET_TRANSACTION_BLOCKHASH_RETRIES || 5,
+);
 
 let queue = Promise.resolve();
 let nextRequestAt = 0;
@@ -51,6 +56,47 @@ function withAlignedPreflightCommitment(init, method) {
     body: JSON.stringify(payload),
   };
 }
+
+function isBlockhashNotFoundError(error) {
+  const message = String(error?.message || error || "");
+  const transactionMessage = String(error?.transactionMessage || "");
+  return /blockhash not found/i.test(`${message} ${transactionMessage}`);
+}
+
+// web3.js obtains and signs a legacy Transaction inside Connection.sendTransaction.
+// Retrying the raw JSON-RPC payload would reuse the stale signed blockhash, so that
+// cannot recover. Retrying Connection.sendTransaction with the original signers
+// forces web3.js to fetch a fresh blockhash and re-sign the transaction.
+const nativeSendTransaction = Connection.prototype.sendTransaction;
+Connection.prototype.sendTransaction = async function guardedSendTransaction(
+  transaction,
+  signersOrOptions,
+  options,
+) {
+  // Legacy transactions pass a signer array. Versioned transactions are already
+  // signed and cannot be safely regenerated here, so leave them untouched.
+  if (!Array.isArray(signersOrOptions)) {
+    return nativeSendTransaction.call(this, transaction, signersOrOptions, options);
+  }
+
+  let lastError;
+  for (let attempt = 0; attempt <= TRANSACTION_BLOCKHASH_RETRIES; attempt += 1) {
+    try {
+      return await nativeSendTransaction.call(this, transaction, signersOrOptions, options);
+    } catch (error) {
+      lastError = error;
+      if (!isBlockhashNotFoundError(error) || attempt === TRANSACTION_BLOCKHASH_RETRIES) {
+        throw error;
+      }
+      const retryNumber = attempt + 1;
+      console.warn(
+        `Devnet transaction retrying with fresh blockhash (${retryNumber}/${TRANSACTION_BLOCKHASH_RETRIES})`,
+      );
+      await sleep(750 + (retryNumber * 500));
+    }
+  }
+  throw lastError;
+};
 
 async function isTransientNullAccount(response, method) {
   if (method !== "getAccountInfo" || response.status !== 200) return false;
@@ -122,6 +168,8 @@ globalThis.fetch = async function guardedDevnetFetch(input, init) {
           await sleep(nullDelay);
           continue;
         } else if (await isTransientBlockhashError(response, method)) {
+          // Do not retry the same signed RPC payload. Let Connection.sendTransaction
+          // see the error so the prototype wrapper above can regenerate and re-sign.
           if (blockhashRetries >= BLOCKHASH_RETRIES) {
             return response;
           }
@@ -153,5 +201,5 @@ globalThis.fetch = async function guardedDevnetFetch(input, init) {
 };
 
 console.log(
-  `Devnet RPC guard enabled: minInterval=${MIN_INTERVAL_MS}ms maxRetries=${MAX_RETRIES} nullAccountRetries=${NULL_ACCOUNT_RETRIES} blockhashRetries=${BLOCKHASH_RETRIES} preflightCommitment=confirmed`,
+  `Devnet RPC guard enabled: minInterval=${MIN_INTERVAL_MS}ms maxRetries=${MAX_RETRIES} nullAccountRetries=${NULL_ACCOUNT_RETRIES} blockhashRetries=${BLOCKHASH_RETRIES} transactionBlockhashRetries=${TRANSACTION_BLOCKHASH_RETRIES} preflightCommitment=confirmed`,
 );
