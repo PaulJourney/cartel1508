@@ -6,8 +6,37 @@ on:
       - scripts/devnet-pre-mainnet.trigger
 permissions:
   contents: read
+concurrency:
+  group: devnet-persistent-wallet-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
 jobs:
+  trigger-check:
+    runs-on: ubuntu-latest
+    outputs:
+      run_devnet: ${{ steps.check.outputs.run_devnet }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 2
+      - name: Detect explicit devnet trigger
+        id: check
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "run_devnet=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git rev-parse HEAD^ >/dev/null 2>&1 && \
+             git diff --name-only HEAD^ HEAD -- scripts/devnet-pre-mainnet.trigger | grep -qx 'scripts/devnet-pre-mainnet.trigger'; then
+            echo "run_devnet=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_devnet=false" >> "$GITHUB_OUTPUT"
+            echo "Devnet validation intentionally skipped: explicit trigger file was not changed in the latest commit."
+          fi
   deploy-smoke:
+    needs: trigger-check
+    if: needs.trigger-check.outputs.run_devnet == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 70
     env:
