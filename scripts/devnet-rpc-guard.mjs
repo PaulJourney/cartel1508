@@ -14,9 +14,17 @@ const BLOCKHASH_RETRIES = Number(process.env.DEVNET_BLOCKHASH_RETRIES || 0);
 const TRANSACTION_BLOCKHASH_RETRIES = Number(
   process.env.DEVNET_TRANSACTION_BLOCKHASH_RETRIES || 5,
 );
+const WEB3_RPC_MIN_INTERVAL_MS = Number(
+  process.env.DEVNET_WEB3_RPC_MIN_INTERVAL_MS || 650,
+);
+const WEB3_RPC_429_RETRIES = Number(
+  process.env.DEVNET_WEB3_RPC_429_RETRIES || 8,
+);
 
 let queue = Promise.resolve();
 let nextRequestAt = 0;
+let web3RpcQueue = Promise.resolve();
+let web3RpcNextRequestAt = 0;
 
 function isGuardedRpc(input) {
   const url = typeof input === "string" ? input : input?.url || String(input || "");
@@ -62,6 +70,85 @@ function isBlockhashNotFoundError(error) {
   const transactionMessage = String(error?.transactionMessage || "");
   return /blockhash not found/i.test(`${message} ${transactionMessage}`);
 }
+
+function isRateLimitError(error) {
+  return /(^|\s)429(\s|$)|too many requests|rate limit/i.test(
+    String(error?.message || error || ""),
+  );
+}
+
+async function withWeb3RpcPacing(invoke, method = "unknown") {
+  let release;
+  const previous = web3RpcQueue;
+  web3RpcQueue = new Promise((resolve) => {
+    release = resolve;
+  });
+  await previous;
+
+  try {
+    const spacing = Math.max(0, web3RpcNextRequestAt - Date.now());
+    if (spacing > 0) await sleep(spacing);
+
+    let lastError;
+    for (let attempt = 0; attempt <= WEB3_RPC_429_RETRIES; attempt += 1) {
+      web3RpcNextRequestAt = Date.now() + WEB3_RPC_MIN_INTERVAL_MS;
+      try {
+        return await invoke();
+      } catch (error) {
+        lastError = error;
+        if (!isRateLimitError(error) || attempt === WEB3_RPC_429_RETRIES) {
+          throw error;
+        }
+        const retryNumber = attempt + 1;
+        const delay = Math.min(12_000, 1_000 * (2 ** Math.min(attempt, 3)));
+        console.warn(
+          `Devnet web3 RPC ${method} rate-limited; retry ${retryNumber}/${WEB3_RPC_429_RETRIES} after ${delay}ms`,
+        );
+        await sleep(delay);
+      }
+    }
+    throw lastError;
+  } finally {
+    release();
+  }
+}
+
+// web3.js v1.x assigns _rpcRequest and _rpcBatchRequest on each Connection
+// instance inside the constructor. Installing inherited accessors before any
+// Connection is constructed lets us wrap those internal request functions and
+// pace every JSON-RPC call, including calls that do not use globalThis.fetch.
+const RPC_REQUEST = Symbol("devnet-rpc-request");
+const RPC_BATCH_REQUEST = Symbol("devnet-rpc-batch-request");
+
+Object.defineProperty(Connection.prototype, "_rpcRequest", {
+  configurable: true,
+  get() {
+    return this[RPC_REQUEST];
+  },
+  set(value) {
+    if (typeof value !== "function") {
+      this[RPC_REQUEST] = value;
+      return;
+    }
+    this[RPC_REQUEST] = (method, args) =>
+      withWeb3RpcPacing(() => value(method, args), method);
+  },
+});
+
+Object.defineProperty(Connection.prototype, "_rpcBatchRequest", {
+  configurable: true,
+  get() {
+    return this[RPC_BATCH_REQUEST];
+  },
+  set(value) {
+    if (typeof value !== "function") {
+      this[RPC_BATCH_REQUEST] = value;
+      return;
+    }
+    this[RPC_BATCH_REQUEST] = (requests) =>
+      withWeb3RpcPacing(() => value(requests), "batch");
+  },
+});
 
 // web3.js obtains and signs a legacy Transaction inside Connection.sendTransaction.
 // Retrying the raw JSON-RPC payload would reuse the stale signed blockhash, so that
@@ -201,5 +288,5 @@ globalThis.fetch = async function guardedDevnetFetch(input, init) {
 };
 
 console.log(
-  `Devnet RPC guard enabled: minInterval=${MIN_INTERVAL_MS}ms maxRetries=${MAX_RETRIES} nullAccountRetries=${NULL_ACCOUNT_RETRIES} blockhashRetries=${BLOCKHASH_RETRIES} transactionBlockhashRetries=${TRANSACTION_BLOCKHASH_RETRIES} preflightCommitment=confirmed`,
+  `Devnet RPC guard enabled: fetchMinInterval=${MIN_INTERVAL_MS}ms web3RpcMinInterval=${WEB3_RPC_MIN_INTERVAL_MS}ms maxRetries=${MAX_RETRIES} web3Rpc429Retries=${WEB3_RPC_429_RETRIES} nullAccountRetries=${NULL_ACCOUNT_RETRIES} transactionBlockhashRetries=${TRANSACTION_BLOCKHASH_RETRIES} preflightCommitment=confirmed`,
 );
