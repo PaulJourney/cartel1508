@@ -1,1 +1,1 @@
-2026-08-20 persistent devnet deployer validation
+2026-08-21 funding-safe persistent devnet validation
