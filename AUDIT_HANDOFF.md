@@ -48,6 +48,7 @@ There is no production Revenue Verifier / Revenue Adapter / qualified-revenue ch
 - Purchases while ACTIVE increase `current_week_units`/depth only and never prequalify the next week.
 - GRACE/INACTIVE partial purchases accumulate toward the current next requirement inside one seven-day window.
 - During an INACTIVE live partial window, **SELF only** is provisional. Pioneer/network have no partial exception.
+- Clarification (audit SRP-01): the provisional protection covers the wallet's entire per-mint SELF bucket, including SELF accrued before the window opened (e.g. carried from prior ACTIVE weeks into a GRACE-opened window). This repository wording is canonical; the external dossier's narrower §6.4 phrasing is superseded.
 - Claims are ACTIVE-only.
 - INACTIVE unclaimed SELF/network/Pioneer value becomes permanently Treasury-destined.
 - Stale value is settled before late reactivation.

@@ -140,7 +140,7 @@ These are exercised across Rust/property tests, LiteSVM, an isolated Solana vali
 
 ## Production configuration / fail-closed launch
 
-The current development source intentionally has `MAINNET_REGISTRATION_OPEN_AT = 0`. Under the `production` feature, initialization refuses to proceed until the launch configuration is frozen.
+The frozen release source pins `MAINNET_REGISTRATION_OPEN_AT = 1_788_238_800` (2026-09-01 05:00 UTC). Under the `production` feature, initialization refuses to proceed unless every launch parameter matches the frozen configuration exactly.
 
 The final production initialization must match compile-time values for:
 
