@@ -24,6 +24,6 @@
   "production_runtime_run_url": "https://github.com/PaulJourney/cartel1508/actions/runs/32451874529",
   "production_runtime_evidence_sha256": "cf7739214657ddad1acc64188779b8dd8fb9a44ea8b152943021de4530a24d8d",
   "production_runtime_status": "passed",
-  "audit_status": "pending",
-  "smoke_test_plan_approved": false
+  "audit_status": "passed",
+  "smoke_test_plan_approved": true
 }
